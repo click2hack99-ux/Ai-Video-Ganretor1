@@ -38,16 +38,11 @@ def detect_duration(prompt):
             print(f"Detected duration: {dur}s from prompt")
             return dur
     
-    if any(w in prompt_lower for w in ['short', 'quick', 'brief', 'chhota']):
-        return 5
-    if any(w in prompt_lower for w in ['long', 'detailed', 'lamba', 'extended']):
-        return 15
-    
     return 5
 
 
 # ============================================================
-# ENHANCE PROMPT - OpenRouter/Gemini/Ollama
+# ENHANCE PROMPT
 # ============================================================
 def enhance_prompt(prompt, cfg):
     ai_provider = cfg.get("ai_provider", "none")
@@ -81,7 +76,7 @@ Return ONLY the enhanced prompt, max 150 words."""
                 "max_tokens": 200
             }
             
-            print(f"OpenRouter request with model: {model}")
+            print(f"OpenRouter enhancing with model: {model}")
             r = requests.post(
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers=headers, json=data, timeout=30
@@ -89,14 +84,12 @@ Return ONLY the enhanced prompt, max 150 words."""
             
             if r.status_code != 200:
                 print(f"OpenRouter error {r.status_code}: {r.text[:300]}")
-                raise Exception(f"OpenRouter error: {r.status_code}")
+                return prompt + ", cinematic quality"
             
             resp = r.json()
-            if "choices" not in resp or len(resp["choices"]) == 0:
-                print(f"No choices in response: {resp}")
-                raise Exception("No response from OpenRouter")
-            
-            return resp["choices"][0]["message"]["content"].strip()
+            if "choices" in resp and len(resp["choices"]) > 0:
+                return resp["choices"][0]["message"]["content"].strip()
+            return prompt + ", cinematic quality"
 
         elif ai_provider == "gem":
             model = cfg.get("gem_model", "gemini-1.5-flash")
@@ -109,21 +102,20 @@ Return ONLY the enhanced prompt, max 150 words."""
                 "generationConfig": {"maxOutputTokens": 200}
             }
             
-            print(f"Gemini request with model: {model}")
+            print(f"Gemini enhancing with model: {model}")
             r = requests.post(
                 url, params={"key": cfg.get("gem_key", "")},
                 json=data, timeout=30
             )
             
             if r.status_code != 200:
-                print(f"Gemini error {r.status_code}: {r.text[:300]}")
-                raise Exception(f"Gemini error: {r.status_code}")
+                print(f"Gemini error {r.status_code}")
+                return prompt + ", cinematic quality"
             
             resp = r.json()
-            if "candidates" not in resp or len(resp["candidates"]) == 0:
-                raise Exception("No response from Gemini")
-            
-            return resp["candidates"][0]["content"]["parts"][0]["text"].strip()
+            if "candidates" in resp and len(resp["candidates"]) > 0:
+                return resp["candidates"][0]["content"]["parts"][0]["text"].strip()
+            return prompt + ", cinematic quality"
 
         elif ai_provider == "oll":
             model = cfg.get("oll_model", "llama2")
@@ -132,7 +124,7 @@ Return ONLY the enhanced prompt, max 150 words."""
             
             url = cfg.get("oll_url", "http://localhost:11434") + "/api/generate"
             
-            print(f"Ollama request with model: {model}")
+            print(f"Ollama enhancing with model: {model}")
             r = requests.post(url, json={
                 "model": model,
                 "prompt": f"{system}\n\nPrompt: {prompt}",
@@ -140,33 +132,30 @@ Return ONLY the enhanced prompt, max 150 words."""
             }, timeout=120)
             
             if r.status_code != 200:
-                raise Exception(f"Ollama error: {r.status_code}")
+                print(f"Ollama error {r.status_code}")
+                return prompt + ", cinematic quality"
             
             resp = r.json()
-            if "response" not in resp:
-                raise Exception("No response from Ollama")
-            
-            return resp["response"].strip()
+            if "response" in resp:
+                return resp["response"].strip()
+            return prompt + ", cinematic quality"
 
     except Exception as e:
-        print(f"Enhance failed: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"Enhance error: {e}")
 
-    return prompt + ", cinematic, photorealistic, 4K, smooth motion, high quality"
+    return prompt + ", cinematic quality, high definition, realistic"
 
 
 # ============================================================
-# VIDEO GENERATION - OpenRouter/Gemini/Ollama
+# VIDEO GENERATION
 # ============================================================
 def generate_video(prompt, cfg, duration):
-    """Generate video using AI to create description, then make actual video"""
+    """Generate video using AI"""
     
     provider = cfg.get("video_provider", "or")
     
-    system = f"""Create a {duration} second video description in JSON format.
-Return ONLY:
-{{"description": "Detailed scene description", "elements": ["element1", "element2"]}}"""
+    system = f"""Create a {duration} second video description in JSON:
+{{"description": "Scene description", "mood": "mood"}}"""
 
     try:
         if provider == "or":
@@ -190,17 +179,18 @@ Return ONLY:
                 "max_tokens": 300
             }
             
+            print(f"OpenRouter video with model: {model}")
             r = requests.post(
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers=headers, json=data, timeout=30
             )
             
             if r.status_code != 200:
-                raise Exception(f"OpenRouter video generation error: {r.status_code}")
+                raise Exception(f"OpenRouter error {r.status_code}")
             
             resp = r.json()
             if "choices" not in resp:
-                raise Exception("Invalid response from OpenRouter")
+                raise Exception("Invalid OpenRouter response")
             
             response_text = resp["choices"][0]["message"]["content"]
 
@@ -215,13 +205,14 @@ Return ONLY:
                 "generationConfig": {"maxOutputTokens": 300}
             }
             
+            print(f"Gemini video with model: {model}")
             r = requests.post(
                 url, params={"key": cfg.get("gem_key", "")},
                 json=data, timeout=30
             )
             
             if r.status_code != 200:
-                raise Exception(f"Gemini video generation error: {r.status_code}")
+                raise Exception(f"Gemini error {r.status_code}")
             
             resp = r.json()
             response_text = resp["candidates"][0]["content"]["parts"][0]["text"]
@@ -233,6 +224,7 @@ Return ONLY:
             
             url = cfg.get("oll_url", "http://localhost:11434") + "/api/generate"
             
+            print(f"Ollama video with model: {model}")
             r = requests.post(url, json={
                 "model": model,
                 "prompt": f"{system}\n\nPrompt: {prompt}",
@@ -240,7 +232,7 @@ Return ONLY:
             }, timeout=180)
             
             if r.status_code != 200:
-                raise Exception(f"Ollama error: {r.status_code}")
+                raise Exception(f"Ollama error {r.status_code}")
             
             resp = r.json()
             response_text = resp["response"]
@@ -248,9 +240,9 @@ Return ONLY:
         else:
             raise Exception(f"Unknown provider: {provider}")
 
-        print(f"Video description: {response_text[:200]}")
+        print(f"Video response: {response_text[:200]}")
 
-        # Create actual video
+        # Create video frames
         video_bytes = create_video_frames(response_text, prompt, duration)
         return video_bytes, "video/mp4"
 
@@ -262,7 +254,7 @@ Return ONLY:
 
 
 def create_video_frames(description, original_prompt, duration):
-    """Creates a video from frames with text overlay"""
+    """Creates a video from frames"""
     try:
         from PIL import Image, ImageDraw, ImageFont
         import numpy as np
@@ -277,11 +269,11 @@ def create_video_frames(description, original_prompt, duration):
         for frame_num in range(total_frames):
             progress = frame_num / max(total_frames - 1, 1)
             
-            # Create frame image
+            # Create frame
             img = Image.new("RGB", (width, height), color=(20, 20, 40))
             draw = ImageDraw.Draw(img)
             
-            # Gradient background
+            # Gradient
             for y in range(height):
                 ratio = y / height
                 r = int(20 + ratio * 40)
@@ -289,12 +281,11 @@ def create_video_frames(description, original_prompt, duration):
                 b = int(40 + ratio * 60)
                 draw.line([(0, y), (width, y)], fill=(r, g, b))
             
-            # Load font
+            # Font
             try:
                 font_large = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 60)
-                font_small = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 30)
             except:
-                font_large = font_small = ImageFont.load_default()
+                font_large = ImageFont.load_default()
             
             # Text animation
             alpha = 1.0
@@ -303,7 +294,7 @@ def create_video_frames(description, original_prompt, duration):
             elif progress > 0.8:
                 alpha = (1 - progress) / 0.2
             
-            # Display prompt
+            # Display text
             text = original_prompt[:80]
             bbox = draw.textbbox((0, 0), text, font=font_large)
             text_w = bbox[2] - bbox[0]
@@ -319,7 +310,7 @@ def create_video_frames(description, original_prompt, duration):
             
             frames.append(np.array(img))
         
-        # Create video file using ffmpeg
+        # Create video with ffmpeg
         import subprocess
         import tempfile
         
@@ -347,10 +338,11 @@ def create_video_frames(description, original_prompt, duration):
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
             
             if result.returncode != 0:
-                print(f"FFmpeg error: {result.stderr[:500]}")
-                raise Exception("FFmpeg failed")
+                print(f"FFmpeg error: {result.stderr[:300]}")
+                # Return placeholder if ffmpeg fails
+                return create_placeholder_video()
             
-            # Read video file
+            # Read video
             with open(output_path, "rb") as f:
                 video_bytes = f.read()
             
@@ -361,7 +353,7 @@ def create_video_frames(description, original_prompt, duration):
             return video_bytes
             
         except FileNotFoundError:
-            print("FFmpeg not found, returning placeholder")
+            print("FFmpeg not found")
             return create_placeholder_video()
         
     except Exception as e:
@@ -370,517 +362,13 @@ def create_video_frames(description, original_prompt, duration):
 
 
 def create_placeholder_video():
-    """Returns a minimal valid MP4 file"""
-    mp4_header = bytes([
+    """Minimal MP4 placeholder"""
+    return bytes([
         0x00, 0x00, 0x00, 0x20, 0x66, 0x74, 0x79, 0x70,
         0x69, 0x73, 0x6f, 0x6d, 0x00, 0x00, 0x00, 0x00,
         0x69, 0x73, 0x6f, 0x6d, 0x69, 0x73, 0x6f, 0x32,
         0x6d, 0x70, 0x34, 0x31, 0x00, 0x00, 0x00, 0x00,
-    ])
-    return mp4_header + b'\x00' * 2000
-
-
-# ============================================================
-# HTML FRONTEND
-# ============================================================
-HTML = '''<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>AI Video Generator</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box;}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0d0d0d;color:#ececec;height:100vh;display:flex;flex-direction:column;overflow:hidden;}
-.header{display:flex;align-items:center;justify-content:space-between;padding:14px 24px;border-bottom:1px solid #1e1e1e;background:#0d0d0d;position:sticky;top:0;z-index:100;}
-.logo{display:flex;align-items:center;gap:10px;font-size:18px;font-weight:600;color:#fff;}
-.logo-icon{width:34px;height:34px;background:linear-gradient(135deg,#7c3aed,#4f46e5);border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:18px;}
-.header-right{display:flex;align-items:center;gap:12px;}
-.api-status{display:flex;align-items:center;gap:6px;font-size:13px;color:#555;}
-.status-dot{width:8px;height:8px;border-radius:50%;background:#333;transition:background 0.3s;}
-.status-dot.on{background:#10b981;}
-.settings-btn{background:none;border:1px solid #2e2e2e;color:#ccc;padding:7px 14px;border-radius:8px;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:6px;transition:all 0.2s;}
-.settings-btn:hover{background:#1a1a1a;border-color:#555;color:#fff;}
-.chat-wrap{flex:1;overflow-y:auto;padding:24px 0 8px;scroll-behavior:smooth;}
-.chat-wrap::-webkit-scrollbar{width:5px;}
-.chat-wrap::-webkit-scrollbar-thumb{background:#222;border-radius:3px;}
-.msg-row{max-width:780px;margin:0 auto;padding:6px 24px;}
-.welcome{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:55vh;text-align:center;gap:14px;padding:24px;}
-.w-icon{width:68px;height:68px;background:linear-gradient(135deg,#7c3aed,#4f46e5);border-radius:18px;display:flex;align-items:center;justify-content:center;font-size:34px;margin-bottom:4px;box-shadow:0 8px 32px rgba(124,58,237,0.3);}
-.welcome h1{font-size:26px;font-weight:700;color:#fff;}
-.welcome p{color:#666;font-size:15px;max-width:460px;line-height:1.6;}
-.chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:10px;}
-.chip{background:#141414;border:1px solid #252525;padding:9px 16px;border-radius:22px;font-size:13px;color:#aaa;cursor:pointer;transition:all 0.2s;}
-.chip:hover{background:#1c1c1c;border-color:#4f46e5;color:#fff;}
-.message{margin-bottom:20px;animation:fadeUp 0.3s ease;}
-@keyframes fadeUp{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
-.user-msg{display:flex;justify-content:flex-end;}
-.user-bubble{background:#1e1e35;border:1px solid #2e2e5a;padding:12px 16px;border-radius:18px 18px 4px 18px;max-width:68%;font-size:15px;line-height:1.5;color:#dde;}
-.ai-msg{display:flex;gap:12px;align-items:flex-start;}
-.ai-av{width:32px;height:32px;background:linear-gradient(135deg,#7c3aed,#4f46e5);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;margin-top:2px;}
-.ai-body{flex:1;}
-.ai-text{font-size:15px;line-height:1.6;color:#ddd;margin-bottom:10px;}
-.vid-card{background:#141414;border:1px solid #222;border-radius:14px;overflow:hidden;max-width:580px;}
-.vid-card video{width:100%;display:block;background:#000;max-height:340px;}
-.vid-footer{padding:12px 16px;display:flex;align-items:center;justify-content:space-between;gap:8px;}
-.vid-title{font-size:13px;color:#999;font-weight:500;flex:1;}
-.vid-meta{font-size:12px;color:#555;}
-.dl-btn{background:#4f46e5;color:#fff;border:none;padding:7px 14px;border-radius:7px;font-size:13px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:5px;transition:background 0.2s;white-space:nowrap;}
-.dl-btn:hover{background:#4338ca;}
-.typing-wrap{display:flex;gap:12px;align-items:flex-start;margin-bottom:20px;}
-.dots{display:flex;align-items:center;gap:5px;padding:14px;background:#141414;border-radius:10px;}
-.dots span{width:8px;height:8px;background:#444;border-radius:50%;animation:bop 1.4s infinite ease-in-out;}
-.dots span:nth-child(1){animation-delay:-0.32s;}
-.dots span:nth-child(2){animation-delay:-0.16s;}
-@keyframes bop{0%,80%,100%{transform:scale(0.7);background:#333;}40%{transform:scale(1);background:#7c3aed;}}
-.prog-box{margin-top:10px;min-width:320px;}
-.prog-bar{height:4px;background:#1e1e1e;border-radius:2px;overflow:hidden;margin-bottom:8px;}
-.prog-fill{height:100%;background:linear-gradient(90deg,#7c3aed,#4f46e5);border-radius:2px;transition:width 0.8s ease;}
-.steps{display:flex;flex-direction:column;gap:6px;}
-.step{font-size:13px;color:#444;display:flex;align-items:center;gap:6px;transition:color 0.3s;}
-.step.active{color:#8b5cf6;}
-.step.done{color:#10b981;}
-.timer{font-size:12px;color:#555;margin-top:6px;}
-.err-box{background:#1a0808;border:1px solid #5a1a1a;color:#f87171;padding:12px 16px;border-radius:10px;font-size:14px;line-height:1.6;}
-.input-area{padding:14px 24px 18px;background:#0d0d0d;border-top:1px solid #1a1a1a;}
-.input-wrap{max-width:780px;margin:0 auto;}
-.input-box{display:flex;align-items:flex-end;background:#141414;border:1px solid #2e2e2e;border-radius:14px;padding:11px 14px;gap:8px;transition:border-color 0.2s;}
-.input-box:focus-within{border-color:#4f46e5;}
-.input-box textarea{flex:1;background:none;border:none;outline:none;color:#ececec;font-size:15px;resize:none;max-height:180px;min-height:24px;line-height:1.5;font-family:inherit;}
-.input-box textarea::placeholder{color:#444;}
-.send-btn{width:36px;height:36px;background:#4f46e5;border:none;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all 0.2s;flex-shrink:0;}
-.send-btn:hover{background:#4338ca;transform:scale(1.05);}
-.send-btn:disabled{background:#222;cursor:not-allowed;transform:none;}
-.send-btn svg{width:17px;height:17px;fill:#fff;}
-.hint{text-align:center;font-size:12px;color:#333;margin-top:7px;}
-.overlay{position:fixed;inset:0;background:rgba(0,0,0,0.85);backdrop-filter:blur(6px);z-index:1000;display:none;align-items:center;justify-content:center;}
-.overlay.show{display:flex;}
-.modal{background:#111;border:1px solid #222;border-radius:18px;padding:26px;width:520px;max-width:95vw;max-height:90vh;overflow-y:auto;animation:mIn 0.2s ease;}
-@keyframes mIn{from{opacity:0;transform:scale(0.94);}to{opacity:1;transform:scale(1);}}
-.m-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:22px;}
-.m-title{font-size:17px;font-weight:600;}
-.x-btn{background:none;border:none;color:#666;cursor:pointer;font-size:22px;line-height:1;transition:color 0.2s;}
-.x-btn:hover{color:#fff;}
-.sec-label{font-size:11px;font-weight:700;color:#555;letter-spacing:1px;text-transform:uppercase;margin-bottom:12px;margin-top:20px;}
-.divider{height:1px;background:#1e1e1e;margin:20px 0;}
-.tabs{display:flex;background:#0a0a0a;border-radius:10px;padding:4px;margin-bottom:16px;gap:3px;}
-.tab{flex:1;padding:7px;border:none;background:none;color:#666;border-radius:7px;cursor:pointer;font-size:12px;transition:all 0.2s;font-family:inherit;}
-.tab.on{background:#4f46e5;color:#fff;}
-.tab:hover:not(.on){background:#1a1a1a;color:#ccc;}
-.panel{display:none;}
-.panel.show{display:block;}
-.fg{margin-bottom:14px;}
-label{display:block;font-size:12px;color:#666;margin-bottom:5px;font-weight:500;}
-input[type=text],input[type=password],select{width:100%;background:#0a0a0a;border:1px solid #222;color:#eee;padding:10px 13px;border-radius:8px;font-size:14px;outline:none;transition:border-color 0.2s;font-family:inherit;}
-input:focus,select:focus{border-color:#4f46e5;}
-select option{background:#111;}
-.note{font-size:12px;color:#555;margin-top:6px;line-height:1.5;padding:8px 10px;background:#0a0a0a;border-radius:6px;border-left:2px solid #333;}
-.custom-group{margin-top:10px;padding:10px;background:#0a0a0a;border-radius:8px;border-left:2px solid #4f46e5;}
-.m-foot{display:flex;gap:10px;margin-top:22px;}
-.btn-test{flex:1;padding:10px;background:#0d0d0d;border:1px solid #2e2e2e;color:#aaa;border-radius:8px;cursor:pointer;font-size:14px;transition:all 0.2s;font-family:inherit;}
-.btn-test:hover{background:#1a1a1a;color:#fff;}
-.btn-save{flex:1;padding:10px;background:#4f46e5;border:none;color:#fff;border-radius:8px;cursor:pointer;font-size:14px;font-weight:600;transition:background 0.2s;font-family:inherit;}
-.btn-save:hover{background:#4338ca;}
-.s-msg{text-align:center;font-size:13px;padding:9px;border-radius:7px;margin-top:12px;display:none;}
-.s-msg.ok{background:#0a1f14;color:#34d399;border:1px solid #065f46;display:block;}
-.s-msg.fail{background:#1f0a0a;color:#f87171;border:1px solid #7f1d1d;display:block;}
-.s-msg.info{background:#0a0a1f;color:#818cf8;border:1px solid #312e81;display:block;}
-</style>
-</head>
-<body>
-
-<div class="header">
-  <div class="logo">
-    <div class="logo-icon">🎬</div>
-    AI Video Generator
-  </div>
-  <div class="header-right">
-    <div class="api-status">
-      <div class="status-dot" id="dot"></div>
-      <span id="dotTxt">Setup Required</span>
-    </div>
-    <button class="settings-btn" onclick="openM()">⚙️ Settings</button>
-  </div>
-</div>
-
-<div class="chat-wrap" id="chat">
-  <div class="msg-row">
-    <div class="welcome" id="welcome">
-      <div class="w-icon">🎬</div>
-      <h1>AI Video Generator</h1>
-      <p>Real AI videos from your prompts. Mention duration like <strong>"10 second ka video"</strong> to control length.</p>
-      <div class="chips">
-        <div class="chip" onclick="useP(this)">A boy and girl hugging in park, 10 second video</div>
-        <div class="chip" onclick="useP(this)">Ocean waves at sunset, 15 seconds</div>
-        <div class="chip" onclick="useP(this)">City traffic at night, 20 second</div>
-        <div class="chip" onclick="useP(this)">Snow falling in forest, 10 seconds</div>
-        <div class="chip" onclick="useP(this)">Rocket launching, 15 second video</div>
-        <div class="chip" onclick="useP(this)">Tiger in jungle, 20 seconds</div>
-      </div>
-    </div>
-  </div>
-</div>
-
-<div class="input-area">
-  <div class="input-wrap">
-    <div class="input-box">
-      <textarea id="inp"
-        placeholder="Describe video... add '10 second' or '20 second' for duration"
-        rows="1" onkeydown="onKey(event)" oninput="resize(this)"></textarea>
-      <button class="send-btn" id="sendBtn" onclick="send()">
-        <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
-      </button>
-    </div>
-    <div class="hint">Enter to send • Shift+Enter for new line</div>
-  </div>
-</div>
-
-<!-- Settings Modal -->
-<div class="overlay" id="overlay" onclick="overlayClick(event)">
-  <div class="modal">
-    <div class="m-head">
-      <div class="m-title">⚙️ Settings</div>
-      <button class="x-btn" onclick="closeM()">×</button>
-    </div>
-
-    <div class="sec-label">🎬 Video Provider</div>
-    <div class="tabs">
-      <button class="tab on" id="vt-or" onclick="switchVTab('or',this)">OpenRouter</button>
-      <button class="tab" id="vt-gem" onclick="switchVTab('gem',this)">Gemini</button>
-      <button class="tab" id="vt-oll" onclick="switchVTab('oll',this)">Ollama</button>
-    </div>
-
-    <!-- OpenRouter -->
-    <div class="panel show" id="vp-or">
-      <div class="fg">
-        <label>API Key</label>
-        <input type="password" id="or-key" placeholder="sk-or-v1-..."/>
-      </div>
-      <div class="fg">
-        <label>Model</label>
-        <select id="or-model" onchange="orModelChange()">
-          <option value="meta-llama/llama-3.1-8b-instruct:free">Llama 3.1 8B (Free)</option>
-          <option value="google/gemma-2-9b-it:free">Gemma 2 9B (Free)</option>
-          <option value="openai/gpt-4o-mini">GPT-4o Mini</option>
-          <option value="anthropic/claude-3-haiku">Claude 3 Haiku</option>
-          <option value="custom">🔧 Custom Model</option>
-        </select>
-      </div>
-      <div class="custom-group" id="or-custom-group" style="display:none;">
-        <label>Custom Model ID</label>
-        <input type="text" id="or-custom" placeholder="e.g., openai/gpt-4-turbo"/>
-        <div class="note" style="margin-top:8px;">Enter model ID from openrouter.ai/models</div>
-      </div>
-      <div class="note">Get token: openrouter.ai/keys</div>
-    </div>
-
-    <!-- Gemini -->
-    <div class="panel" id="vp-gem">
-      <div class="fg">
-        <label>API Key</label>
-        <input type="password" id="gem-key" placeholder="AIza..."/>
-      </div>
-      <div class="fg">
-        <label>Model</label>
-        <select id="gem-model" onchange="gemModelChange()">
-          <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
-          <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
-          <option value="custom">🔧 Custom Model</option>
-        </select>
-      </div>
-      <div class="custom-group" id="gem-custom-group" style="display:none;">
-        <label>Custom Model ID</label>
-        <input type="text" id="gem-custom" placeholder="e.g., gemini-2.0-flash"/>
-        <div class="note" style="margin-top:8px;">Use custom Gemini model names</div>
-      </div>
-      <div class="note">Get token: makersuite.google.com/app/apikey</div>
-    </div>
-
-    <!-- Ollama -->
-    <div class="panel" id="vp-oll">
-      <div class="fg">
-        <label>Server URL</label>
-        <input type="text" id="oll-url" placeholder="http://localhost:11434" value="http://localhost:11434"/>
-      </div>
-      <div class="fg">
-        <label>Model Name</label>
-        <input type="text" id="oll-model" placeholder="llama2, mistral, neural-chat..."/>
-      </div>
-      <div class="custom-group">
-        <div class="note">💡 Custom model support: Just type your local model name above and it will work!</div>
-      </div>
-      <div class="note">Make sure Ollama is running on your server</div>
-    </div>
-
-    <div class="s-msg" id="sMsg"></div>
-    <div class="m-foot">
-      <button class="btn-test" onclick="testConn()">🔌 Test</button>
-      <button class="btn-save" onclick="saveS()">✓ Save</button>
-    </div>
-  </div>
-</div>
-
-<script>
-let cfg = JSON.parse(localStorage.getItem('aivid_cfg') || '{}');
-let busy = false;
-let curVTab = 'or';
-let timerInterval = null;
-
-window.onload = () => { loadCfg(); updateDot(); };
-
-function updateDot() {
-  const d = document.getElementById('dot'), t = document.getElementById('dotTxt');
-  if (cfg.video_provider) {
-    d.classList.add('on');
-    const names = { or: 'OpenRouter', gem: 'Gemini', oll: 'Ollama' };
-    t.textContent = names[cfg.video_provider] || 'Connected';
-  } else {
-    d.classList.remove('on');
-    t.textContent = 'Setup Required';
-  }
-}
-
-function loadCfg() {
-  if (cfg.video_provider) {
-    switchVTabById(cfg.video_provider);
-    if (cfg.video_provider === 'or') {
-      document.getElementById('or-key').value = cfg.or_key || '';
-      document.getElementById('or-model').value = cfg.or_model || 'meta-llama/llama-3.1-8b-instruct:free';
-      document.getElementById('or-custom').value = cfg.or_custom || '';
-      if (cfg.or_custom) {
-        document.getElementById('or-model').value = 'custom';
-        document.getElementById('or-custom-group').style.display = 'block';
-      }
-    } else if (cfg.video_provider === 'gem') {
-      document.getElementById('gem-key').value = cfg.gem_key || '';
-      document.getElementById('gem-model').value = cfg.gem_model || 'gemini-1.5-flash';
-      document.getElementById('gem-custom').value = cfg.gem_custom || '';
-      if (cfg.gem_custom) {
-        document.getElementById('gem-model').value = 'custom';
-        document.getElementById('gem-custom-group').style.display = 'block';
-      }
-    } else if (cfg.video_provider === 'oll') {
-      document.getElementById('oll-url').value = cfg.oll_url || 'http://localhost:11434';
-      document.getElementById('oll-model').value = cfg.oll_model || '';
-      document.getElementById('oll-custom').value = cfg.oll_custom || '';
-    }
-  }
-}
-
-function orModelChange() {
-  const sel = document.getElementById('or-model');
-  const customGroup = document.getElementById('or-custom-group');
-  customGroup.style.display = sel.value === 'custom' ? 'block' : 'none';
-}
-
-function gemModelChange() {
-  const sel = document.getElementById('gem-model');
-  const customGroup = document.getElementById('gem-custom-group');
-  customGroup.style.display = sel.value === 'custom' ? 'block' : 'none';
-}
-
-function switchVTab(id, btn) {
-  curVTab = id;
-  document.querySelectorAll('[id^="vt-"]').forEach(b => b.classList.remove('on'));
-  btn.classList.add('on');
-  document.querySelectorAll('[id^="vp-"]').forEach(p => p.classList.remove('show'));
-  document.getElementById('vp-' + id).classList.add('show');
-}
-
-function switchVTabById(id) {
-  curVTab = id;
-  document.querySelectorAll('[id^="vt-"]').forEach(b => b.classList.remove('on'));
-  const btn = document.getElementById('vt-' + id);
-  if (btn) btn.classList.add('on');
-  document.querySelectorAll('[id^="vp-"]').forEach(p => p.classList.remove('show'));
-  const panel = document.getElementById('vp-' + id);
-  if (panel) panel.classList.add('show');
-}
-
-function getCfg() {
-  const c = { video_provider: curVTab };
-  if (curVTab === 'or') {
-    c.or_key = document.getElementById('or-key').value;
-    const model = document.getElementById('or-model').value;
-    if (model === 'custom') {
-      c.or_model = 'custom';
-      c.or_custom = document.getElementById('or-custom').value;
-    } else {
-      c.or_model = model;
-    }
-  } else if (curVTab === 'gem') {
-    c.gem_key = document.getElementById('gem-key').value;
-    const model = document.getElementById('gem-model').value;
-    if (model === 'custom') {
-      c.gem_model = 'custom';
-      c.gem_custom = document.getElementById('gem-custom').value;
-    } else {
-      c.gem_model = model;
-    }
-  } else if (curVTab === 'oll') {
-    c.oll_url = document.getElementById('oll-url').value;
-    c.oll_model = document.getElementById('oll-model').value;
-  }
-  return c;
-}
-
-function openM() { document.getElementById('overlay').classList.add('show'); loadCfg(); }
-function closeM() { document.getElementById('overlay').classList.remove('show'); }
-function overlayClick(e) { if (e.target.id === 'overlay') closeM(); }
-
-async function testConn() {
-  const msg = document.getElementById('sMsg');
-  msg.className = 's-msg info'; msg.textContent = '⏳ Testing...';
-  try {
-    const r = await fetch('/test-api', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cfg: getCfg() })
-    });
-    const d = await r.json();
-    msg.className = 's-msg ' + (d.success ? 'ok' : 'fail');
-    msg.textContent = (d.success ? '✅ ' : '❌ ') + d.message;
-  } catch (e) {
-    msg.className = 's-msg fail'; msg.textContent = '❌ Server error';
-  }
-}
-
-function saveS() {
-  cfg = getCfg();
-  localStorage.setItem('aivid_cfg', JSON.stringify(cfg));
-  updateDot(); closeM();
-}
-
-function useP(el) {
-  document.getElementById('inp').value = el.textContent;
-  resize(document.getElementById('inp'));
-  send();
-}
-
-function onKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }
-function resize(el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 180) + 'px'; }
-
-async function send() {
-  const inp = document.getElementById('inp');
-  const prompt = inp.value.trim();
-  if (!prompt || busy) return;
-  if (!cfg.video_provider) { alert('Setup API in Settings!'); openM(); return; }
-
-  document.getElementById('welcome').style.display = 'none';
-  addUser(prompt);
-  inp.value = '';
-  busy = true;
-  document.getElementById('sendBtn').disabled = true;
-
-  const tid = addTyping(prompt);
-  try {
-    const r = await fetch('/generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, cfg }),
-      signal: AbortSignal.timeout(900000)
-    });
-    const d = await r.json();
-    removeTyping(tid);
-    if (d.success) addVideo(d);
-    else addErr(d.error || 'Failed');
-  } catch (e) {
-    removeTyping(tid);
-    addErr('Error: ' + e.message);
-  }
-  busy = false;
-  document.getElementById('sendBtn').disabled = false;
-}
-
-function addUser(txt) {
-  const w = document.createElement('div'); w.className = 'msg-row';
-  w.innerHTML = `<div class="message user-msg"><div class="user-bubble">${esc(txt)}</div></div>`;
-  document.getElementById('chat').appendChild(w); scrollD();
-}
-
-function addTyping(prompt) {
-  const id = 't' + Date.now();
-  const durMatch = prompt.match(/(\d+)\s*sec/i);
-  const dur = durMatch ? durMatch[1] : '5';
-
-  const w = document.createElement('div'); w.className = 'msg-row'; w.id = id;
-  w.innerHTML = `
-  <div class="typing-wrap">
-    <div class="ai-av">🎬</div>
-    <div class="ai-body">
-      <div class="dots"><span></span><span></span><span></span></div>
-      <div class="prog-box">
-        <div class="prog-bar"><div class="prog-fill" id="pf${id}" style="width:0%"></div></div>
-        <div class="steps">
-          <div class="step active" id="s1${id}">🤖 Enhancing prompt...</div>
-          <div class="step" id="s2${id}">🎬 Generating video (${dur}s)...</div>
-          <div class="step" id="s3${id}">📥 Saving video...</div>
-        </div>
-        <div class="timer" id="timer${id}">⏱️ 0s</div>
-      </div>
-    </div>
-  </div>`;
-  document.getElementById('chat').appendChild(w); scrollD();
-
-  let elapsed = 0;
-  timerInterval = setInterval(() => {
-    elapsed++;
-    const timerEl = document.getElementById('timer' + id);
-    if (timerEl) timerEl.textContent = `⏱️ ${elapsed}s`;
-  }, 1000);
-
-  animProg(id);
-  return id;
-}
-
-function animProg(id) {
-  [[30,1,2000],[70,2,10000],[95,3,30000]].forEach(([pct, step, delay]) => {
-    setTimeout(() => {
-      const pf = document.getElementById('pf' + id); if (pf) pf.style.width = pct + '%';
-      for (let i = 1; i <= 3; i++) {
-        const el = document.getElementById('s' + i + id);
-        if (el) el.className = 'step' + (i < step ? ' done' : i === step ? ' active' : '');
-      }
-    }, delay);
-  });
-}
-
-function removeTyping(id) {
-  if (timerInterval) clearInterval(timerInterval);
-  const el = document.getElementById(id);
-  if (el) el.remove();
-}
-
-function addVideo(d) {
-  const w = document.createElement('div'); w.className = 'msg-row';
-  w.innerHTML = `
-  <div class="message ai-msg">
-    <div class="ai-av">🎬</div>
-    <div class="ai-body">
-      <div class="ai-text">✅ <strong>${esc(d.title)}</strong> — ${d.duration}s</div>
-      <div class="vid-card">
-        <video controls autoplay muted loop><source src="${d.video_url}" type="video/mp4"></video>
-        <div class="vid-footer">
-          <span class="vid-title">🎬 ${esc(d.title)}</span>
-          <a href="${d.video_url}" download class="dl-btn">⬇ Download</a>
-        </div>
-      </div>
-    </div>
-  </div>`;
-  document.getElementById('chat').appendChild(w); scrollD();
-}
-
-function addErr(msg) {
-  const w = document.createElement('div'); w.className = 'msg-row';
-  w.innerHTML = `<div class="message ai-msg"><div class="ai-av">🎬</div><div class="ai-body"><div class="err-box">⚠️ ${esc(msg)}</div></div></div>`;
-  document.getElementById('chat').appendChild(w); scrollD();
-}
-
-function scrollD() { const c = document.getElementById('chat'); setTimeout(() => c.scrollTop = c.scrollHeight, 100); }
-function esc(t) { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
-</script>
-</body>
-</html>'''
+    ]) + b'\x00' * 2000
 
 
 # ============================================================
@@ -888,7 +376,7 @@ function esc(t) { const d = document.createElement('div'); d.textContent = t; re
 # ============================================================
 @app.route("/")
 def index():
-    return HTML, 200, {"Content-Type": "text/html; charset=utf-8"}
+    return send_from_directory(".", "index.html")
 
 
 @app.route("/generate", methods=["POST"])
@@ -903,8 +391,16 @@ def generate():
         return jsonify({"error": "No provider configured"}), 400
 
     try:
+        print(f"\n=== GENERATING VIDEO ===")
+        print(f"Prompt: {prompt[:80]}")
+        print(f"Provider: {cfg.get('video_provider')}")
+        
         duration = detect_duration(prompt)
+        print(f"Duration: {duration}s")
+        
         enhanced = enhance_prompt(prompt, cfg)
+        print(f"Enhanced: {enhanced[:80]}")
+        
         video_bytes, mime = generate_video(enhanced, cfg, duration)
 
         if not video_bytes or len(video_bytes) < 500:
@@ -917,6 +413,8 @@ def generate():
         with open(vid_path, "wb") as f:
             f.write(video_bytes)
 
+        print(f"Saved: {vid_name} ({len(video_bytes)/1024:.1f} KB)")
+
         words = prompt.split()
         title = " ".join(words[:6]) if len(words) > 6 else prompt
 
@@ -928,6 +426,7 @@ def generate():
         })
 
     except Exception as e:
+        print(f"ERROR: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
@@ -949,24 +448,24 @@ def test_api():
             r = requests.post(
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers={"Authorization": f"Bearer {cfg.get('or_key','')}"},
-                json={"model": model, "messages": [{"role": "user", "content": "test"}], "max_tokens": 10},
+                json={"model": model, "messages": [{"role": "user", "content": "hi"}], "max_tokens": 10},
                 timeout=10
             )
             if r.status_code == 200:
-                return jsonify({"success": True, "message": f"OpenRouter connected! Model: {model}"})
-            return jsonify({"success": False, "message": f"Invalid key (status {r.status_code})"})
+                return jsonify({"success": True, "message": f"✅ OpenRouter OK! Model: {model}"})
+            return jsonify({"success": False, "message": f"❌ Invalid key"})
 
         elif provider == "gem":
             model = cfg.get("gem_custom") or cfg.get("gem_model", "gemini-1.5-flash")
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
             r = requests.post(
                 url, params={"key": cfg.get("gem_key", "")},
-                json={"contents": [{"parts": [{"text": "test"}]}]},
+                json={"contents": [{"parts": [{"text": "hi"}]}]},
                 timeout=10
             )
             if r.status_code == 200:
-                return jsonify({"success": True, "message": f"Gemini connected! Model: {model}"})
-            return jsonify({"success": False, "message": f"Invalid key (status {r.status_code})"})
+                return jsonify({"success": True, "message": f"✅ Gemini OK! Model: {model}"})
+            return jsonify({"success": False, "message": f"❌ Invalid key"})
 
         elif provider == "oll":
             model = cfg.get("oll_model", "llama2")
@@ -976,21 +475,21 @@ def test_api():
             )
             if r.status_code == 200:
                 models = r.json().get("models", [])
-                return jsonify({"success": True, "message": f"Ollama connected! {len(models)} models. Using: {model}"})
-            return jsonify({"success": False, "message": "Cannot reach Ollama"})
+                return jsonify({"success": True, "message": f"✅ Ollama OK! Using: {model}"})
+            return jsonify({"success": False, "message": "❌ Cannot reach Ollama"})
 
     except Exception as e:
-        return jsonify({"success": False, "message": str(e)})
+        return jsonify({"success": False, "message": f"❌ {str(e)}"})
 
-    return jsonify({"success": False, "message": "Unknown error"})
+    return jsonify({"success": False, "message": "❌ Unknown error"})
 
 
 @app.route("/health")
 def health():
-    return jsonify({"status": "ok"})
+    return jsonify({"status": "ok", "videos": os.listdir(VIDEOS_DIR)})
 
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    print(f"Starting on port {port}")
+    print(f"\n🎬 AI Video Generator starting on port {port}\n")
     app.run(host="0.0.0.0", port=port, debug=False)
