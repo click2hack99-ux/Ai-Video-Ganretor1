@@ -55,13 +55,9 @@ def enhance_prompt(prompt, cfg):
         enhanced = f"{prompt}, cinematic quality, high definition, realistic, detailed, professional cinematography, smooth motion, 4K"
         return enhanced
 
-    system = """You are an expert AI video generation prompt engineer.
-Your job is to enhance the user prompt for maximum realism and quality.
-Rules:
-- Keep ALL original details exactly (characters, places, actions)
-- Add cinematic details: lighting, camera angle, atmosphere
-- Add quality boosters: 4K, cinematic, photorealistic, smooth motion
-- Return ONLY the enhanced prompt, nothing else, max 150 words"""
+    system = """You are an expert prompt enhancer. Make the prompt more detailed and cinematic for video generation.
+Keep original details. Add: lighting, camera angles, atmosphere, mood.
+Return ONLY the enhanced prompt, max 150 words."""
 
     try:
         if ai_provider == "or":
@@ -71,43 +67,91 @@ Rules:
                 "HTTP-Referer": "https://aivideogen.onrender.com",
                 "X-Title": "AI Video Generator"
             }
+            
+            model = cfg.get("or_model", "meta-llama/llama-3.1-8b-instruct:free")
+            if cfg.get("or_custom"):
+                model = cfg.get("or_custom")
+            
             data = {
-                "model": cfg.get("or_model", "meta-llama/llama-3.1-8b-instruct:free"),
+                "model": model,
                 "messages": [
                     {"role": "system", "content": system},
                     {"role": "user", "content": prompt}
                 ],
                 "max_tokens": 200
             }
+            
+            print(f"OpenRouter request with model: {model}")
             r = requests.post(
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers=headers, json=data, timeout=30
             )
-            return r.json()["choices"][0]["message"]["content"].strip()
+            
+            if r.status_code != 200:
+                print(f"OpenRouter error {r.status_code}: {r.text[:300]}")
+                raise Exception(f"OpenRouter error: {r.status_code}")
+            
+            resp = r.json()
+            if "choices" not in resp or len(resp["choices"]) == 0:
+                print(f"No choices in response: {resp}")
+                raise Exception("No response from OpenRouter")
+            
+            return resp["choices"][0]["message"]["content"].strip()
 
         elif ai_provider == "gem":
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{cfg.get('gem_model','gemini-1.5-flash')}:generateContent"
+            model = cfg.get("gem_model", "gemini-1.5-flash")
+            if cfg.get("gem_custom"):
+                model = cfg.get("gem_custom")
+            
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
             data = {
                 "contents": [{"parts": [{"text": f"{system}\n\nPrompt: {prompt}"}]}],
                 "generationConfig": {"maxOutputTokens": 200}
             }
+            
+            print(f"Gemini request with model: {model}")
             r = requests.post(
                 url, params={"key": cfg.get("gem_key", "")},
                 json=data, timeout=30
             )
-            return r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+            
+            if r.status_code != 200:
+                print(f"Gemini error {r.status_code}: {r.text[:300]}")
+                raise Exception(f"Gemini error: {r.status_code}")
+            
+            resp = r.json()
+            if "candidates" not in resp or len(resp["candidates"]) == 0:
+                raise Exception("No response from Gemini")
+            
+            return resp["candidates"][0]["content"]["parts"][0]["text"].strip()
 
         elif ai_provider == "oll":
+            model = cfg.get("oll_model", "llama2")
+            if cfg.get("oll_custom"):
+                model = cfg.get("oll_custom")
+            
             url = cfg.get("oll_url", "http://localhost:11434") + "/api/generate"
+            
+            print(f"Ollama request with model: {model}")
             r = requests.post(url, json={
-                "model": cfg.get("oll_model", "llama2"),
+                "model": model,
                 "prompt": f"{system}\n\nPrompt: {prompt}",
                 "stream": False
-            }, timeout=60)
-            return r.json()["response"].strip()
+            }, timeout=120)
+            
+            if r.status_code != 200:
+                raise Exception(f"Ollama error: {r.status_code}")
+            
+            resp = r.json()
+            if "response" not in resp:
+                raise Exception("No response from Ollama")
+            
+            return resp["response"].strip()
 
     except Exception as e:
         print(f"Enhance failed: {e}")
+        import traceback
+        traceback.print_exc()
 
     return prompt + ", cinematic, photorealistic, 4K, smooth motion, high quality"
 
@@ -116,18 +160,13 @@ Rules:
 # VIDEO GENERATION - OpenRouter/Gemini/Ollama
 # ============================================================
 def generate_video(prompt, cfg, duration):
-    """
-    Uses OpenRouter/Gemini/Ollama to generate video description,
-    then creates actual video from frames
-    """
+    """Generate video using AI to create description, then make actual video"""
     
     provider = cfg.get("video_provider", "or")
     
-    # Get video description/script from AI
-    system = f"""You are a video scene generator. Create a detailed description for a {duration} second video.
-Return a JSON with:
-{{"scenes": [{{"duration": 3, "description": "Scene 1 description", "elements": ["element1", "element2"]}}]}}
-Make it cinematic and detailed. Total duration = {duration}s"""
+    system = f"""Create a {duration} second video description in JSON format.
+Return ONLY:
+{{"description": "Detailed scene description", "elements": ["element1", "element2"]}}"""
 
     try:
         if provider == "or":
@@ -137,65 +176,97 @@ Make it cinematic and detailed. Total duration = {duration}s"""
                 "HTTP-Referer": "https://aivideogen.onrender.com",
                 "X-Title": "AI Video Generator"
             }
+            
+            model = cfg.get("or_model", "meta-llama/llama-3.1-8b-instruct:free")
+            if cfg.get("or_custom"):
+                model = cfg.get("or_custom")
+            
             data = {
-                "model": cfg.get("or_model", "meta-llama/llama-3.1-8b-instruct:free"),
+                "model": model,
                 "messages": [
                     {"role": "system", "content": system},
                     {"role": "user", "content": prompt}
                 ],
-                "max_tokens": 500
+                "max_tokens": 300
             }
+            
             r = requests.post(
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers=headers, json=data, timeout=30
             )
-            response_text = r.json()["choices"][0]["message"]["content"]
+            
+            if r.status_code != 200:
+                raise Exception(f"OpenRouter video generation error: {r.status_code}")
+            
+            resp = r.json()
+            if "choices" not in resp:
+                raise Exception("Invalid response from OpenRouter")
+            
+            response_text = resp["choices"][0]["message"]["content"]
 
         elif provider == "gem":
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{cfg.get('gem_model','gemini-1.5-flash')}:generateContent"
+            model = cfg.get("gem_model", "gemini-1.5-flash")
+            if cfg.get("gem_custom"):
+                model = cfg.get("gem_custom")
+            
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
             data = {
                 "contents": [{"parts": [{"text": f"{system}\n\nPrompt: {prompt}"}]}],
-                "generationConfig": {"maxOutputTokens": 500}
+                "generationConfig": {"maxOutputTokens": 300}
             }
+            
             r = requests.post(
                 url, params={"key": cfg.get("gem_key", "")},
                 json=data, timeout=30
             )
-            response_text = r.json()["candidates"][0]["content"]["parts"][0]["text"]
+            
+            if r.status_code != 200:
+                raise Exception(f"Gemini video generation error: {r.status_code}")
+            
+            resp = r.json()
+            response_text = resp["candidates"][0]["content"]["parts"][0]["text"]
 
         elif provider == "oll":
+            model = cfg.get("oll_model", "llama2")
+            if cfg.get("oll_custom"):
+                model = cfg.get("oll_custom")
+            
             url = cfg.get("oll_url", "http://localhost:11434") + "/api/generate"
+            
             r = requests.post(url, json={
-                "model": cfg.get("oll_model", "llama2"),
+                "model": model,
                 "prompt": f"{system}\n\nPrompt: {prompt}",
                 "stream": False
-            }, timeout=120)
-            response_text = r.json()["response"]
+            }, timeout=180)
+            
+            if r.status_code != 200:
+                raise Exception(f"Ollama error: {r.status_code}")
+            
+            resp = r.json()
+            response_text = resp["response"]
 
         else:
             raise Exception(f"Unknown provider: {provider}")
 
-        print(f"Video description from {provider}: {response_text[:200]}")
+        print(f"Video description: {response_text[:200]}")
 
-        # Now create actual video frames
+        # Create actual video
         video_bytes = create_video_frames(response_text, prompt, duration)
         return video_bytes, "video/mp4"
 
     except Exception as e:
         print(f"Video generation error: {e}")
+        import traceback
+        traceback.print_exc()
         raise
 
 
 def create_video_frames(description, original_prompt, duration):
-    """
-    Creates a video from frames with text overlay
-    """
+    """Creates a video from frames with text overlay"""
     try:
         from PIL import Image, ImageDraw, ImageFont
         import numpy as np
-        from io import BytesIO
         
-        # Create simple video with frames
         width, height = 1280, 720
         fps = 24
         total_frames = duration * fps
@@ -248,7 +319,7 @@ def create_video_frames(description, original_prompt, duration):
             
             frames.append(np.array(img))
         
-        # Create video file
+        # Create video file using ffmpeg
         import subprocess
         import tempfile
         
@@ -259,7 +330,6 @@ def create_video_frames(description, original_prompt, duration):
             img = Image.fromarray(frame.astype(np.uint8))
             img.save(os.path.join(temp_dir, f"frame_{i:06d}.png"))
         
-        # Use ffmpeg to create video
         output_path = os.path.join(temp_dir, "output.mp4")
         
         try:
@@ -291,7 +361,6 @@ def create_video_frames(description, original_prompt, duration):
             return video_bytes
             
         except FileNotFoundError:
-            # FFmpeg not available, return simple video-like bytes
             print("FFmpeg not found, returning placeholder")
             return create_placeholder_video()
         
@@ -301,20 +370,14 @@ def create_video_frames(description, original_prompt, duration):
 
 
 def create_placeholder_video():
-    """
-    Returns a minimal valid MP4 file when generation fails
-    """
-    import struct
-    
-    # Minimal MP4 header
+    """Returns a minimal valid MP4 file"""
     mp4_header = bytes([
         0x00, 0x00, 0x00, 0x20, 0x66, 0x74, 0x79, 0x70,
         0x69, 0x73, 0x6f, 0x6d, 0x00, 0x00, 0x00, 0x00,
         0x69, 0x73, 0x6f, 0x6d, 0x69, 0x73, 0x6f, 0x32,
         0x6d, 0x70, 0x34, 0x31, 0x00, 0x00, 0x00, 0x00,
     ])
-    
-    return mp4_header + b'\x00' * 1000  # Minimal video file
+    return mp4_header + b'\x00' * 2000
 
 
 # ============================================================
@@ -392,7 +455,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .hint{text-align:center;font-size:12px;color:#333;margin-top:7px;}
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,0.85);backdrop-filter:blur(6px);z-index:1000;display:none;align-items:center;justify-content:center;}
 .overlay.show{display:flex;}
-.modal{background:#111;border:1px solid #222;border-radius:18px;padding:26px;width:500px;max-width:95vw;max-height:90vh;overflow-y:auto;animation:mIn 0.2s ease;}
+.modal{background:#111;border:1px solid #222;border-radius:18px;padding:26px;width:520px;max-width:95vw;max-height:90vh;overflow-y:auto;animation:mIn 0.2s ease;}
 @keyframes mIn{from{opacity:0;transform:scale(0.94);}to{opacity:1;transform:scale(1);}}
 .m-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:22px;}
 .m-title{font-size:17px;font-weight:600;}
@@ -412,6 +475,7 @@ input[type=text],input[type=password],select{width:100%;background:#0a0a0a;borde
 input:focus,select:focus{border-color:#4f46e5;}
 select option{background:#111;}
 .note{font-size:12px;color:#555;margin-top:6px;line-height:1.5;padding:8px 10px;background:#0a0a0a;border-radius:6px;border-left:2px solid #333;}
+.custom-group{margin-top:10px;padding:10px;background:#0a0a0a;border-radius:8px;border-left:2px solid #4f46e5;}
 .m-foot{display:flex;gap:10px;margin-top:22px;}
 .btn-test{flex:1;padding:10px;background:#0d0d0d;border:1px solid #2e2e2e;color:#aaa;border-radius:8px;cursor:pointer;font-size:14px;transition:all 0.2s;font-family:inherit;}
 .btn-test:hover{background:#1a1a1a;color:#fff;}
@@ -421,7 +485,6 @@ select option{background:#111;}
 .s-msg.ok{background:#0a1f14;color:#34d399;border:1px solid #065f46;display:block;}
 .s-msg.fail{background:#1f0a0a;color:#f87171;border:1px solid #7f1d1d;display:block;}
 .s-msg.info{background:#0a0a1f;color:#818cf8;border:1px solid #312e81;display:block;}
-.dur-info{background:#0a0a1f;border:1px solid #312e81;color:#818cf8;padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:16px;line-height:1.6;}
 </style>
 </head>
 <body>
@@ -487,6 +550,7 @@ select option{background:#111;}
       <button class="tab" id="vt-oll" onclick="switchVTab('oll',this)">Ollama</button>
     </div>
 
+    <!-- OpenRouter -->
     <div class="panel show" id="vp-or">
       <div class="fg">
         <label>API Key</label>
@@ -494,16 +558,23 @@ select option{background:#111;}
       </div>
       <div class="fg">
         <label>Model</label>
-        <select id="or-model">
+        <select id="or-model" onchange="orModelChange()">
           <option value="meta-llama/llama-3.1-8b-instruct:free">Llama 3.1 8B (Free)</option>
           <option value="google/gemma-2-9b-it:free">Gemma 2 9B (Free)</option>
           <option value="openai/gpt-4o-mini">GPT-4o Mini</option>
           <option value="anthropic/claude-3-haiku">Claude 3 Haiku</option>
+          <option value="custom">🔧 Custom Model</option>
         </select>
       </div>
-      <div class="note">openrouter.ai/keys</div>
+      <div class="custom-group" id="or-custom-group" style="display:none;">
+        <label>Custom Model ID</label>
+        <input type="text" id="or-custom" placeholder="e.g., openai/gpt-4-turbo"/>
+        <div class="note" style="margin-top:8px;">Enter model ID from openrouter.ai/models</div>
+      </div>
+      <div class="note">Get token: openrouter.ai/keys</div>
     </div>
 
+    <!-- Gemini -->
     <div class="panel" id="vp-gem">
       <div class="fg">
         <label>API Key</label>
@@ -511,14 +582,21 @@ select option{background:#111;}
       </div>
       <div class="fg">
         <label>Model</label>
-        <select id="gem-model">
+        <select id="gem-model" onchange="gemModelChange()">
           <option value="gemini-1.5-flash">Gemini 1.5 Flash</option>
           <option value="gemini-1.5-pro">Gemini 1.5 Pro</option>
+          <option value="custom">🔧 Custom Model</option>
         </select>
       </div>
-      <div class="note">makersuite.google.com/app/apikey</div>
+      <div class="custom-group" id="gem-custom-group" style="display:none;">
+        <label>Custom Model ID</label>
+        <input type="text" id="gem-custom" placeholder="e.g., gemini-2.0-flash"/>
+        <div class="note" style="margin-top:8px;">Use custom Gemini model names</div>
+      </div>
+      <div class="note">Get token: makersuite.google.com/app/apikey</div>
     </div>
 
+    <!-- Ollama -->
     <div class="panel" id="vp-oll">
       <div class="fg">
         <label>Server URL</label>
@@ -526,9 +604,12 @@ select option{background:#111;}
       </div>
       <div class="fg">
         <label>Model Name</label>
-        <input type="text" id="oll-model" placeholder="llama2, mistral..."/>
+        <input type="text" id="oll-model" placeholder="llama2, mistral, neural-chat..."/>
       </div>
-      <div class="note">Make sure Ollama is running locally</div>
+      <div class="custom-group">
+        <div class="note">💡 Custom model support: Just type your local model name above and it will work!</div>
+      </div>
+      <div class="note">Make sure Ollama is running on your server</div>
     </div>
 
     <div class="s-msg" id="sMsg"></div>
@@ -565,14 +646,37 @@ function loadCfg() {
     if (cfg.video_provider === 'or') {
       document.getElementById('or-key').value = cfg.or_key || '';
       document.getElementById('or-model').value = cfg.or_model || 'meta-llama/llama-3.1-8b-instruct:free';
+      document.getElementById('or-custom').value = cfg.or_custom || '';
+      if (cfg.or_custom) {
+        document.getElementById('or-model').value = 'custom';
+        document.getElementById('or-custom-group').style.display = 'block';
+      }
     } else if (cfg.video_provider === 'gem') {
       document.getElementById('gem-key').value = cfg.gem_key || '';
       document.getElementById('gem-model').value = cfg.gem_model || 'gemini-1.5-flash';
+      document.getElementById('gem-custom').value = cfg.gem_custom || '';
+      if (cfg.gem_custom) {
+        document.getElementById('gem-model').value = 'custom';
+        document.getElementById('gem-custom-group').style.display = 'block';
+      }
     } else if (cfg.video_provider === 'oll') {
       document.getElementById('oll-url').value = cfg.oll_url || 'http://localhost:11434';
       document.getElementById('oll-model').value = cfg.oll_model || '';
+      document.getElementById('oll-custom').value = cfg.oll_custom || '';
     }
   }
+}
+
+function orModelChange() {
+  const sel = document.getElementById('or-model');
+  const customGroup = document.getElementById('or-custom-group');
+  customGroup.style.display = sel.value === 'custom' ? 'block' : 'none';
+}
+
+function gemModelChange() {
+  const sel = document.getElementById('gem-model');
+  const customGroup = document.getElementById('gem-custom-group');
+  customGroup.style.display = sel.value === 'custom' ? 'block' : 'none';
 }
 
 function switchVTab(id, btn) {
@@ -597,10 +701,22 @@ function getCfg() {
   const c = { video_provider: curVTab };
   if (curVTab === 'or') {
     c.or_key = document.getElementById('or-key').value;
-    c.or_model = document.getElementById('or-model').value;
+    const model = document.getElementById('or-model').value;
+    if (model === 'custom') {
+      c.or_model = 'custom';
+      c.or_custom = document.getElementById('or-custom').value;
+    } else {
+      c.or_model = model;
+    }
   } else if (curVTab === 'gem') {
     c.gem_key = document.getElementById('gem-key').value;
-    c.gem_model = document.getElementById('gem-model').value;
+    const model = document.getElementById('gem-model').value;
+    if (model === 'custom') {
+      c.gem_model = 'custom';
+      c.gem_custom = document.getElementById('gem-custom').value;
+    } else {
+      c.gem_model = model;
+    }
   } else if (curVTab === 'oll') {
     c.oll_url = document.getElementById('oll-url').value;
     c.oll_model = document.getElementById('oll-model').value;
@@ -829,25 +945,38 @@ def test_api():
 
     try:
         if provider == "or":
-            r = requests.get("https://openrouter.ai/api/v1/auth/key",
-                           headers={"Authorization": f"Bearer {cfg.get('or_key','')}"}, timeout=10)
+            model = cfg.get("or_custom") or cfg.get("or_model", "meta-llama/llama-3.1-8b-instruct:free")
+            r = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={"Authorization": f"Bearer {cfg.get('or_key','')}"},
+                json={"model": model, "messages": [{"role": "user", "content": "test"}], "max_tokens": 10},
+                timeout=10
+            )
             if r.status_code == 200:
-                return jsonify({"success": True, "message": "OpenRouter connected!"})
-            return jsonify({"success": False, "message": "Invalid token"})
+                return jsonify({"success": True, "message": f"OpenRouter connected! Model: {model}"})
+            return jsonify({"success": False, "message": f"Invalid key (status {r.status_code})"})
 
         elif provider == "gem":
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
-            r = requests.post(url, params={"key": cfg.get("gem_key", "")},
-                            json={"contents": [{"parts": [{"text": "test"}]}]}, timeout=10)
+            model = cfg.get("gem_custom") or cfg.get("gem_model", "gemini-1.5-flash")
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+            r = requests.post(
+                url, params={"key": cfg.get("gem_key", "")},
+                json={"contents": [{"parts": [{"text": "test"}]}]},
+                timeout=10
+            )
             if r.status_code == 200:
-                return jsonify({"success": True, "message": "Gemini connected!"})
-            return jsonify({"success": False, "message": "Invalid key"})
+                return jsonify({"success": True, "message": f"Gemini connected! Model: {model}"})
+            return jsonify({"success": False, "message": f"Invalid key (status {r.status_code})"})
 
         elif provider == "oll":
-            r = requests.get(cfg.get("oll_url", "http://localhost:11434") + "/api/tags", timeout=10)
+            model = cfg.get("oll_model", "llama2")
+            r = requests.get(
+                cfg.get("oll_url", "http://localhost:11434") + "/api/tags",
+                timeout=10
+            )
             if r.status_code == 200:
                 models = r.json().get("models", [])
-                return jsonify({"success": True, "message": f"Ollama connected! {len(models)} models"})
+                return jsonify({"success": True, "message": f"Ollama connected! {len(models)} models. Using: {model}"})
             return jsonify({"success": False, "message": "Cannot reach Ollama"})
 
     except Exception as e:
