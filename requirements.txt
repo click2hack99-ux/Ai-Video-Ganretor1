@@ -3,6 +3,3 @@ flask-cors
 requests
 Pillow
 numpy
-gtts
-imageio[ffmpeg]
-imageio-ffmpeg
