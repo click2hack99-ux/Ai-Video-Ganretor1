@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_from_directory, Response
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 import requests
 import json
@@ -7,8 +7,10 @@ import uuid
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 import textwrap
-import time
-import threading
+import subprocess
+import tempfile
+import struct
+import wave
 
 app = Flask(__name__)
 CORS(app)
@@ -17,7 +19,7 @@ VIDEOS_DIR = "generated_videos"
 os.makedirs(VIDEOS_DIR, exist_ok=True)
 
 # ============================================================
-# HTML - Complete Frontend
+# FULL HTML FRONTEND
 # ============================================================
 HTML = '''<!DOCTYPE html>
 <html lang="en">
@@ -28,8 +30,6 @@ HTML = '''<!DOCTYPE html>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0d0d0d;color:#ececec;height:100vh;display:flex;flex-direction:column;overflow:hidden;}
-
-/* Header */
 .header{display:flex;align-items:center;justify-content:space-between;padding:14px 24px;border-bottom:1px solid #1e1e1e;background:#0d0d0d;position:sticky;top:0;z-index:100;}
 .logo{display:flex;align-items:center;gap:10px;font-size:18px;font-weight:600;color:#fff;}
 .logo-icon{width:34px;height:34px;background:linear-gradient(135deg,#7c3aed,#4f46e5);border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:18px;}
@@ -39,14 +39,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .status-dot.on{background:#10b981;}
 .settings-btn{background:none;border:1px solid #2e2e2e;color:#ccc;padding:7px 14px;border-radius:8px;cursor:pointer;font-size:13px;display:flex;align-items:center;gap:6px;transition:all 0.2s;}
 .settings-btn:hover{background:#1a1a1a;border-color:#555;color:#fff;}
-
-/* Chat */
 .chat-wrap{flex:1;overflow-y:auto;padding:24px 0 8px;scroll-behavior:smooth;}
 .chat-wrap::-webkit-scrollbar{width:5px;}
 .chat-wrap::-webkit-scrollbar-thumb{background:#222;border-radius:3px;}
 .msg-row{max-width:780px;margin:0 auto;padding:6px 24px;}
-
-/* Welcome */
 .welcome{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:55vh;text-align:center;gap:14px;padding:24px;}
 .w-icon{width:68px;height:68px;background:linear-gradient(135deg,#7c3aed,#4f46e5);border-radius:18px;display:flex;align-items:center;justify-content:center;font-size:34px;margin-bottom:4px;box-shadow:0 8px 32px rgba(124,58,237,0.3);}
 .welcome h1{font-size:26px;font-weight:700;color:#fff;}
@@ -54,8 +50,6 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;margin-top:10px;}
 .chip{background:#141414;border:1px solid #252525;padding:9px 16px;border-radius:22px;font-size:13px;color:#aaa;cursor:pointer;transition:all 0.2s;}
 .chip:hover{background:#1c1c1c;border-color:#4f46e5;color:#fff;}
-
-/* Messages */
 .message{margin-bottom:20px;animation:fadeUp 0.3s ease;}
 @keyframes fadeUp{from{opacity:0;transform:translateY(8px);}to{opacity:1;transform:translateY(0);}}
 .user-msg{display:flex;justify-content:flex-end;}
@@ -64,16 +58,12 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .ai-av{width:32px;height:32px;background:linear-gradient(135deg,#7c3aed,#4f46e5);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0;margin-top:2px;}
 .ai-body{flex:1;}
 .ai-text{font-size:15px;line-height:1.6;color:#ddd;margin-bottom:10px;}
-
-/* Video Card */
 .vid-card{background:#141414;border:1px solid #222;border-radius:14px;overflow:hidden;max-width:580px;}
 .vid-card video{width:100%;display:block;background:#000;max-height:340px;}
 .vid-footer{padding:12px 16px;display:flex;align-items:center;justify-content:space-between;}
 .vid-title{font-size:13px;color:#999;font-weight:500;}
 .dl-btn{background:#4f46e5;color:#fff;border:none;padding:7px 14px;border-radius:7px;font-size:13px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:5px;transition:background 0.2s;}
 .dl-btn:hover{background:#4338ca;}
-
-/* Typing / Progress */
 .typing-wrap{display:flex;gap:12px;align-items:flex-start;margin-bottom:20px;}
 .dots{display:flex;align-items:center;gap:5px;padding:14px;background:#141414;border-radius:10px;}
 .dots span{width:8px;height:8px;background:#444;border-radius:50%;animation:bop 1.4s infinite ease-in-out;}
@@ -87,11 +77,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .step{font-size:13px;color:#444;display:flex;align-items:center;gap:6px;transition:color 0.3s;}
 .step.active{color:#8b5cf6;}
 .step.done{color:#10b981;}
-
-/* Error */
 .err-box{background:#1a0808;border:1px solid #5a1a1a;color:#f87171;padding:12px 16px;border-radius:10px;font-size:14px;}
-
-/* Input */
 .input-area{padding:14px 24px 18px;background:#0d0d0d;border-top:1px solid #1a1a1a;}
 .input-wrap{max-width:780px;margin:0 auto;}
 .input-box{display:flex;align-items:flex-end;background:#141414;border:1px solid #2e2e2e;border-radius:14px;padding:11px 14px;gap:8px;transition:border-color 0.2s;}
@@ -103,8 +89,6 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .send-btn:disabled{background:#222;cursor:not-allowed;transform:none;}
 .send-btn svg{width:17px;height:17px;fill:#fff;}
 .hint{text-align:center;font-size:12px;color:#333;margin-top:7px;}
-
-/* Modal */
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,0.85);backdrop-filter:blur(6px);z-index:1000;display:none;align-items:center;justify-content:center;}
 .overlay.show{display:flex;}
 .modal{background:#111;border:1px solid #222;border-radius:18px;padding:26px;width:460px;max-width:95vw;animation:mIn 0.2s ease;}
@@ -113,14 +97,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .m-title{font-size:17px;font-weight:600;}
 .x-btn{background:none;border:none;color:#666;cursor:pointer;font-size:22px;line-height:1;transition:color 0.2s;}
 .x-btn:hover{color:#fff;}
-
-/* Tabs */
 .tabs{display:flex;background:#0a0a0a;border-radius:10px;padding:4px;margin-bottom:20px;gap:3px;}
 .tab{flex:1;padding:8px;border:none;background:none;color:#666;border-radius:7px;cursor:pointer;font-size:13px;transition:all 0.2s;font-family:inherit;}
 .tab.on{background:#4f46e5;color:#fff;}
 .tab:hover:not(.on){background:#1a1a1a;color:#ccc;}
-
-/* Panel */
 .panel{display:none;}
 .panel.show{display:block;}
 .fg{margin-bottom:14px;}
@@ -129,7 +109,6 @@ input[type=text],input[type=password],select{width:100%;background:#0a0a0a;borde
 input:focus,select:focus{border-color:#4f46e5;}
 select option{background:#111;}
 .note{font-size:12px;color:#444;margin-top:5px;line-height:1.4;}
-
 .m-foot{display:flex;gap:10px;margin-top:22px;}
 .btn-test{flex:1;padding:10px;background:#0d0d0d;border:1px solid #2e2e2e;color:#aaa;border-radius:8px;cursor:pointer;font-size:14px;transition:all 0.2s;font-family:inherit;}
 .btn-test:hover{background:#1a1a1a;color:#fff;}
@@ -142,7 +121,6 @@ select option{background:#111;}
 </style>
 </head>
 <body>
-
 <div class="header">
   <div class="logo">
     <div class="logo-icon">🎬</div>
@@ -188,21 +166,17 @@ select option{background:#111;}
   </div>
 </div>
 
-<!-- Settings Modal -->
 <div class="overlay" id="overlay" onclick="overlayClick(event)">
   <div class="modal">
     <div class="m-head">
       <div class="m-title">⚙️ API Settings</div>
       <button class="x-btn" onclick="closeM()">×</button>
     </div>
-
     <div class="tabs">
       <button class="tab on" onclick="switchTab('or',this)">OpenRouter</button>
       <button class="tab" onclick="switchTab('gem',this)">Gemini</button>
       <button class="tab" onclick="switchTab('oll',this)">Ollama</button>
     </div>
-
-    <!-- OpenRouter -->
     <div class="panel show" id="p-or">
       <div class="fg">
         <label>API Key</label>
@@ -225,8 +199,6 @@ select option{background:#111;}
         <input type="text" id="or-cm" placeholder="provider/model-name"/>
       </div>
     </div>
-
-    <!-- Gemini -->
     <div class="panel" id="p-gem">
       <div class="fg">
         <label>API Key</label>
@@ -241,20 +213,17 @@ select option{background:#111;}
         </select>
       </div>
     </div>
-
-    <!-- Ollama -->
     <div class="panel" id="p-oll">
       <div class="fg">
         <label>Ollama Server URL</label>
-        <input type="text" id="oll-url" value="http://localhost:11434" placeholder="http://localhost:11434"/>
+        <input type="text" id="oll-url" value="http://localhost:11434"/>
       </div>
       <div class="fg">
         <label>Model Name</label>
         <input type="text" id="oll-model" placeholder="llama3, mistral, gemma2..."/>
       </div>
-      <div class="note">Make sure Ollama is running locally with the model pulled.</div>
+      <div class="note">Make sure Ollama is running locally with model pulled.</div>
     </div>
-
     <div class="s-msg" id="sMsg"></div>
     <div class="m-foot">
       <button class="btn-test" onclick="testAPI()">🔌 Test Connection</button>
@@ -264,38 +233,33 @@ select option{background:#111;}
 </div>
 
 <script>
-let cfg = JSON.parse(localStorage.getItem('aicfg')||'{}');
-let busy = false;
-let curTab = 'or';
-
-// Init
-window.onload = () => { loadCfg(); updateDot(); };
-
+let cfg=JSON.parse(localStorage.getItem('aicfg')||'{}');
+let busy=false,curTab='or';
+window.onload=()=>{loadCfg();updateDot();};
 function updateDot(){
-  const d=document.getElementById('dot'), t=document.getElementById('dotTxt');
-  if(cfg.provider){ d.classList.add('on'); t.textContent={openrouter:'OpenRouter',gemini:'Gemini',ollama:'Ollama'}[cfg.provider]||'Connected'; }
-  else{ d.classList.remove('on'); t.textContent='No API'; }
+  const d=document.getElementById('dot'),t=document.getElementById('dotTxt');
+  if(cfg.provider){d.classList.add('on');t.textContent={openrouter:'OpenRouter',gemini:'Gemini',ollama:'Ollama'}[cfg.provider]||'Connected';}
+  else{d.classList.remove('on');t.textContent='No API';}
 }
-
 function loadCfg(){
-  if(!cfg.provider) return;
+  if(!cfg.provider)return;
   const tab={openrouter:'or',gemini:'gem',ollama:'oll'}[cfg.provider];
-  if(tab) switchTabById(tab);
+  if(tab)switchTabById(tab);
   if(cfg.provider==='openrouter'){
     document.getElementById('or-key').value=cfg.api_key||'';
     const sel=document.getElementById('or-model');
     const opt=[...sel.options].find(o=>o.value===cfg.model);
-    if(opt) sel.value=cfg.model; else{ sel.value='custom'; document.getElementById('or-cg').style.display='block'; document.getElementById('or-cm').value=cfg.model||''; }
-  } else if(cfg.provider==='gemini'){
+    if(opt)sel.value=cfg.model;
+    else{sel.value='custom';document.getElementById('or-cg').style.display='block';document.getElementById('or-cm').value=cfg.model||'';}
+  }else if(cfg.provider==='gemini'){
     document.getElementById('gem-key').value=cfg.api_key||'';
     document.getElementById('gem-model').value=cfg.model||'gemini-1.5-flash';
-  } else if(cfg.provider==='ollama'){
+  }else if(cfg.provider==='ollama'){
     document.getElementById('oll-url').value=cfg.ollama_url||'http://localhost:11434';
     document.getElementById('oll-model').value=cfg.model||'';
   }
 }
-
-function switchTab(id, btn){
+function switchTab(id,btn){
   curTab=id;
   document.querySelectorAll('.tab').forEach(b=>b.classList.remove('on'));
   btn.classList.add('on');
@@ -303,7 +267,6 @@ function switchTab(id, btn){
   document.getElementById('p-'+id).classList.add('show');
   document.getElementById('sMsg').className='s-msg';
 }
-
 function switchTabById(id){
   curTab=id;
   const tabs=document.querySelectorAll('.tab');
@@ -312,76 +275,62 @@ function switchTabById(id){
   document.querySelectorAll('.panel').forEach(p=>p.classList.remove('show'));
   document.getElementById('p-'+id).classList.add('show');
 }
-
 function orModelChange(){
-  document.getElementById('or-cg').style.display = document.getElementById('or-model').value==='custom'?'block':'none';
+  document.getElementById('or-cg').style.display=document.getElementById('or-model').value==='custom'?'block':'none';
 }
-
-function getCfgFromForm(){
+function getCfg(){
   if(curTab==='or'){
     let m=document.getElementById('or-model').value;
-    if(m==='custom') m=document.getElementById('or-cm').value;
+    if(m==='custom')m=document.getElementById('or-cm').value;
     return{provider:'openrouter',api_key:document.getElementById('or-key').value,model:m};
-  } else if(curTab==='gem'){
+  }else if(curTab==='gem'){
     return{provider:'gemini',api_key:document.getElementById('gem-key').value,model:document.getElementById('gem-model').value};
-  } else {
+  }else{
     return{provider:'ollama',ollama_url:document.getElementById('oll-url').value,model:document.getElementById('oll-model').value};
   }
 }
-
-function openM(){ document.getElementById('overlay').classList.add('show'); loadCfg(); }
-function closeM(){ document.getElementById('overlay').classList.remove('show'); document.getElementById('sMsg').className='s-msg'; }
-function overlayClick(e){ if(e.target.id==='overlay') closeM(); }
-
+function openM(){document.getElementById('overlay').classList.add('show');loadCfg();}
+function closeM(){document.getElementById('overlay').classList.remove('show');document.getElementById('sMsg').className='s-msg';}
+function overlayClick(e){if(e.target.id==='overlay')closeM();}
 async function testAPI(){
   const msg=document.getElementById('sMsg');
-  msg.className='s-msg info'; msg.textContent='⏳ Testing...';
+  msg.className='s-msg info';msg.textContent='⏳ Testing...';
   try{
-    const r=await fetch('/test-api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({api_config:getCfgFromForm()})});
+    const r=await fetch('/test-api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({api_config:getCfg()})});
     const d=await r.json();
     msg.className='s-msg '+(d.success?'ok':'fail');
     msg.textContent=(d.success?'✅ ':'❌ ')+d.message;
-  } catch(e){ msg.className='s-msg fail'; msg.textContent='❌ Cannot reach server.'; }
+  }catch(e){msg.className='s-msg fail';msg.textContent='❌ Cannot reach server.';}
 }
-
-function saveS(){
-  cfg=getCfgFromForm();
-  localStorage.setItem('aicfg',JSON.stringify(cfg));
-  updateDot(); closeM();
-}
-
-// Chat
-function useP(el){ document.getElementById('inp').value=el.textContent; resize(document.getElementById('inp')); send(); }
-function onKey(e){ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); send(); } }
-function resize(el){ el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,180)+'px'; }
-
+function saveS(){cfg=getCfg();localStorage.setItem('aicfg',JSON.stringify(cfg));updateDot();closeM();}
+function useP(el){document.getElementById('inp').value=el.textContent;resize(document.getElementById('inp'));send();}
+function onKey(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}}
+function resize(el){el.style.height='auto';el.style.height=Math.min(el.scrollHeight,180)+'px';}
 async function send(){
   const inp=document.getElementById('inp');
   const prompt=inp.value.trim();
-  if(!prompt||busy) return;
+  if(!prompt||busy)return;
   document.getElementById('welcome').style.display='none';
   addUser(prompt);
-  inp.value=''; inp.style.height='auto';
-  busy=true; document.getElementById('sendBtn').disabled=true;
+  inp.value='';inp.style.height='auto';
+  busy=true;document.getElementById('sendBtn').disabled=true;
   const tid=addTyping();
   try{
     const r=await fetch('/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt,api_config:cfg})});
     const d=await r.json();
     removeTyping(tid);
-    if(d.success) addVideo(d); else addErr(d.error||'Generation failed');
-  } catch(e){ removeTyping(tid); addErr('Server error. Is server.py running?'); }
-  busy=false; document.getElementById('sendBtn').disabled=false;
+    if(d.success)addVideo(d);else addErr(d.error||'Generation failed');
+  }catch(e){removeTyping(tid);addErr('Server error. Is server.py running?');}
+  busy=false;document.getElementById('sendBtn').disabled=false;
 }
-
 function addUser(txt){
-  const w=document.createElement('div'); w.className='msg-row';
+  const w=document.createElement('div');w.className='msg-row';
   w.innerHTML=`<div class="message user-msg"><div class="user-bubble">${esc(txt)}</div></div>`;
-  document.getElementById('chat').appendChild(w); scrollD();
+  document.getElementById('chat').appendChild(w);scrollD();
 }
-
 function addTyping(){
   const id='t'+Date.now();
-  const w=document.createElement('div'); w.className='msg-row'; w.id=id;
+  const w=document.createElement('div');w.className='msg-row';w.id=id;
   w.innerHTML=`
   <div class="typing-wrap">
     <div class="ai-av">🎬</div>
@@ -398,26 +347,23 @@ function addTyping(){
       </div>
     </div>
   </div>`;
-  document.getElementById('chat').appendChild(w); scrollD();
-  animProg(id); return id;
+  document.getElementById('chat').appendChild(w);scrollD();
+  animProg(id);return id;
 }
-
 function animProg(id){
   [[20,1,800],[45,2,4000],[72,3,8000],[90,4,13000]].forEach(([pct,step,delay])=>{
     setTimeout(()=>{
-      const pf=document.getElementById('pf'+id); if(pf) pf.style.width=pct+'%';
+      const pf=document.getElementById('pf'+id);if(pf)pf.style.width=pct+'%';
       for(let i=1;i<=4;i++){
         const el=document.getElementById('s'+i+id);
-        if(el) el.className='step'+(i<step?' done':i===step?' active':'');
+        if(el)el.className='step'+(i<step?' done':i===step?' active':'');
       }
     },delay);
   });
 }
-
-function removeTyping(id){ const el=document.getElementById(id); if(el) el.remove(); }
-
+function removeTyping(id){const el=document.getElementById(id);if(el)el.remove();}
 function addVideo(d){
-  const w=document.createElement('div'); w.className='msg-row';
+  const w=document.createElement('div');w.className='msg-row';
   w.innerHTML=`
   <div class="message ai-msg">
     <div class="ai-av">🎬</div>
@@ -432,43 +378,41 @@ function addVideo(d){
       </div>
     </div>
   </div>`;
-  document.getElementById('chat').appendChild(w); scrollD();
+  document.getElementById('chat').appendChild(w);scrollD();
 }
-
 function addErr(msg){
-  const w=document.createElement('div'); w.className='msg-row';
+  const w=document.createElement('div');w.className='msg-row';
   w.innerHTML=`
   <div class="message ai-msg">
     <div class="ai-av">🎬</div>
     <div class="ai-body"><div class="err-box">⚠️ ${esc(msg)}</div></div>
   </div>`;
-  document.getElementById('chat').appendChild(w); scrollD();
+  document.getElementById('chat').appendChild(w);scrollD();
 }
-
-function scrollD(){ const c=document.getElementById('chat'); setTimeout(()=>c.scrollTop=c.scrollHeight,100); }
-function esc(t){ const d=document.createElement('div'); d.textContent=t; return d.innerHTML; }
+function scrollD(){const c=document.getElementById('chat');setTimeout(()=>c.scrollTop=c.scrollHeight,100);}
+function esc(t){const d=document.createElement('div');d.textContent=t;return d.innerHTML;}
 </script>
 </body>
 </html>'''
 
 
 # ============================================================
-# AI Response
+# AI RESPONSE
 # ============================================================
 def get_ai_response(prompt, api_config):
     provider = api_config.get("provider", "")
     api_key = api_config.get("api_key", "")
     model = api_config.get("model", "")
 
-    system_prompt = """You are an AI video script generator. Based on the user prompt, create a detailed video scene plan.
-Return ONLY a valid JSON object with this exact structure (no extra text):
+    system_prompt = """You are an AI video script generator. Based on the user prompt, return ONLY valid JSON, no extra text.
+JSON structure:
 {
-  "title": "Short video title",
+  "title": "Short video title max 5 words",
   "scenes": [
     {
       "duration": 4,
-      "text": "Main display text (short, impactful)",
-      "subtitle": "Supporting description line",
+      "text": "Short text max 5 words",
+      "subtitle": "Supporting line max 8 words",
       "bg_color": [R, G, B],
       "text_color": [R, G, B],
       "animation": "fade"
@@ -476,18 +420,17 @@ Return ONLY a valid JSON object with this exact structure (no extra text):
   ]
 }
 Rules:
-- Create 5 to 8 scenes
-- animation must be one of: fade, slide, zoom, typewriter
-- bg_color should match the mood/theme of the prompt
+- 5 to 7 scenes total
+- animation: fade, slide, zoom, or typewriter only
+- Colors must match theme/mood
 - text_color must contrast well with bg_color
-- Keep text short (max 6 words), subtitle max 10 words
-- Make colors vivid and thematic"""
+- Keep all text SHORT"""
 
     try:
         if provider == "gemini":
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model or 'gemini-1.5-flash'}:generateContent"
             data = {
-                "contents": [{"parts": [{"text": f"{system_prompt}\n\nUser prompt: {prompt}"}]}],
+                "contents": [{"parts": [{"text": f"{system_prompt}\n\nPrompt: {prompt}"}]}],
                 "generationConfig": {"temperature": 0.8, "maxOutputTokens": 2048}
             }
             r = requests.post(url, params={"key": api_key}, json=data, timeout=60)
@@ -495,25 +438,37 @@ Rules:
 
         elif provider == "ollama":
             url = api_config.get("ollama_url", "http://localhost:11434") + "/api/generate"
-            r = requests.post(url, json={"model": model or "llama3", "prompt": f"{system_prompt}\n\nUser prompt: {prompt}", "stream": False}, timeout=180)
+            r = requests.post(url, json={
+                "model": model or "llama3",
+                "prompt": f"{system_prompt}\n\nPrompt: {prompt}",
+                "stream": False
+            }, timeout=180)
             text = r.json()["response"]
 
-        else:  # openrouter
-            headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "HTTP-Referer": "http://localhost:5000", "X-Title": "AI Video Generator"}
+        else:  # openrouter default
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://aivideogen.onrender.com",
+                "X-Title": "AI Video Generator"
+            }
             data = {
                 "model": model or "meta-llama/llama-3.1-8b-instruct:free",
-                "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt}],
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt}
+                ],
                 "max_tokens": 2048
             }
-            r = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=data, timeout=60)
+            r = requests.post("https://openrouter.ai/api/v1/chat/completions",
+                              headers=headers, json=data, timeout=60)
             text = r.json()["choices"][0]["message"]["content"]
 
-        # Extract JSON
         s = text.find("{")
         e = text.rfind("}") + 1
         if s != -1 and e > 0:
             return json.loads(text[s:e])
-        raise Exception("No JSON in response")
+        raise Exception("No JSON found")
 
     except Exception as ex:
         print(f"AI Error: {ex}")
@@ -526,66 +481,70 @@ def fallback_scenes(prompt):
     return {
         "title": title,
         "scenes": [
-            {"duration": 4, "text": title[:40], "subtitle": "AI Generated Video", "bg_color": [10, 10, 25], "text_color": [255, 255, 255], "animation": "fade"},
-            {"duration": 4, "text": "Your Vision", "subtitle": prompt[:50], "bg_color": [15, 10, 35], "text_color": [180, 140, 255], "animation": "zoom"},
-            {"duration": 4, "text": "Comes Alive", "subtitle": "Powered by AI", "bg_color": [5, 15, 30], "text_color": [100, 200, 255], "animation": "slide"},
-            {"duration": 3, "text": "Thank You", "subtitle": title[:30], "bg_color": [10, 10, 20], "text_color": [255, 200, 100], "animation": "fade"},
+            {"duration": 4, "text": title[:35], "subtitle": "AI Generated Video",
+             "bg_color": [8, 8, 22], "text_color": [255, 255, 255], "animation": "fade"},
+            {"duration": 4, "text": "Your Vision", "subtitle": prompt[:45],
+             "bg_color": [12, 8, 32], "text_color": [180, 140, 255], "animation": "zoom"},
+            {"duration": 4, "text": "Comes Alive", "subtitle": "Powered by AI",
+             "bg_color": [5, 12, 28], "text_color": [100, 200, 255], "animation": "slide"},
+            {"duration": 3, "text": "Thank You", "subtitle": title[:28],
+             "bg_color": [8, 8, 18], "text_color": [255, 200, 100], "animation": "fade"},
         ]
     }
 
 
 # ============================================================
-# Frame Creator
+# FRAME CREATOR - Pure PIL only
 # ============================================================
-def create_frame(scene, frame_num, total_frames, w=1280, h=720):
-    bg = tuple(scene.get("bg_color", [10, 10, 25]))
-    tc = tuple(scene.get("text_color", [255, 255, 255]))
+def create_frame(scene, frame_num, total_frames, W=1280, H=720):
+    bg = tuple(int(c) for c in scene.get("bg_color", [8, 8, 22]))
+    tc = tuple(int(c) for c in scene.get("text_color", [255, 255, 255]))
     anim = scene.get("animation", "fade")
     prog = frame_num / max(total_frames - 1, 1)
 
-    img = Image.new("RGB", (w, h), bg)
+    img = Image.new("RGB", (W, H), bg)
     draw = ImageDraw.Draw(img)
 
-    # Gradient background
-    for y in range(h):
-        r2 = y / h
-        nr = max(0, min(255, int(bg[0] * (1 - r2 * 0.4) + r2 * 5)))
-        ng = max(0, min(255, int(bg[1] * (1 - r2 * 0.4) + r2 * 5)))
-        nb = max(0, min(255, int(bg[2] * (1 - r2 * 0.2) + r2 * 20)))
-        draw.line([(0, y), (w, y)], fill=(nr, ng, nb))
+    # Gradient BG
+    for y in range(H):
+        ratio = y / H
+        r = max(0, min(255, int(bg[0] + (tc[0] - bg[0]) * ratio * 0.08)))
+        g = max(0, min(255, int(bg[1] + (tc[1] - bg[1]) * ratio * 0.08)))
+        b = max(0, min(255, int(bg[2] + (tc[2] - bg[2]) * ratio * 0.12)))
+        draw.line([(0, y), (W, y)], fill=(r, g, b))
 
-    # Accent color
-    ac = tuple(min(255, int(c * 0.6 + 60)) for c in tc)
+    ac = tuple(min(255, int(c * 0.5 + 80)) for c in tc)
 
-    # Top/bottom borders
-    draw.rectangle([0, 0, w, 3], fill=tc)
-    draw.rectangle([0, h - 3, w, h], fill=tc)
+    # Borders
+    draw.rectangle([0, 0, W, 4], fill=tc)
+    draw.rectangle([0, H - 4, W, H], fill=tc)
 
     # Corner brackets
-    cs = 28
-    for cx, cy, dx, dy in [(12, 12, 1, 1), (w - 12 - cs, 12, -1, 1), (12, h - 12 - cs, 1, -1), (w - 12 - cs, h - 12 - cs, -1, -1)]:
-        draw.rectangle([cx, cy, cx + cs, cy + 3], fill=ac)
-        draw.rectangle([cx, cy, cx + 3, cy + cs], fill=ac)
+    for px, py in [(15, 15), (W - 55, 15), (15, H - 55), (W - 55, H - 55)]:
+        draw.rectangle([px, py, px + 40, py + 3], fill=ac)
+        draw.rectangle([px, py, px + 3, py + 40], fill=ac)
 
-    # Load fonts
-    try:
-        for fp in ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-                   "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-                   "C:/Windows/Fonts/arialbd.ttf", "/System/Library/Fonts/Helvetica.ttc"]:
-            if os.path.exists(fp):
-                fl = ImageFont.truetype(fp, 68)
-                fm = ImageFont.truetype(fp, 34)
-                fs = ImageFont.truetype(fp, 22)
+    # Fonts
+    font_paths = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+        "/usr/share/fonts/truetype/ubuntu/Ubuntu-B.ttf",
+    ]
+    fl = fm = ImageFont.load_default()
+    for fp in font_paths:
+        if os.path.exists(fp):
+            try:
+                fl = ImageFont.truetype(fp, 72)
+                fm = ImageFont.truetype(fp, 36)
                 break
-        else:
-            fl = fm = fs = ImageFont.load_default()
-    except:
-        fl = fm = fs = ImageFont.load_default()
+            except:
+                continue
 
-    main_txt = scene.get("text", "")
-    sub_txt = scene.get("subtitle", "")
+    main_txt = str(scene.get("text", ""))
+    sub_txt = str(scene.get("subtitle", ""))
 
-    # Animation state
+    # Animation
     alpha = 1.0
     ox, oy = 0, 0
 
@@ -593,134 +552,180 @@ def create_frame(scene, frame_num, total_frames, w=1280, h=720):
         if prog < 0.2:
             alpha = prog / 0.2
         elif prog > 0.75:
-            alpha = (1 - prog) / 0.25
+            alpha = (1.0 - prog) / 0.25
 
     elif anim == "slide":
         if prog < 0.25:
-            ox = int(-250 * (1 - prog / 0.25))
+            ox = int(-260 * (1 - prog / 0.25))
             alpha = prog / 0.25
         elif prog > 0.75:
-            ox = int(250 * ((prog - 0.75) / 0.25))
-            alpha = (1 - prog) / 0.25
+            ox = int(260 * ((prog - 0.75) / 0.25))
+            alpha = (1.0 - prog) / 0.25
 
     elif anim == "zoom":
         if prog < 0.25:
             alpha = prog / 0.25
         elif prog > 0.8:
-            alpha = (1 - prog) / 0.2
+            alpha = (1.0 - prog) / 0.2
 
     elif anim == "typewriter":
-        chars = int(len(main_txt) * min(prog * 2.2, 1.0))
-        main_txt = main_txt[:chars]
+        chars = int(len(main_txt) * min(prog * 2.5, 1.0))
+        main_txt = main_txt[:max(1, chars)]
         if prog > 0.8:
-            alpha = (1 - prog) / 0.2
+            alpha = (1.0 - prog) / 0.2
 
-    alpha = max(0.0, min(1.0, alpha))
+    alpha = max(0.01, min(1.0, alpha))
 
     # Draw main text
-    lines = textwrap.wrap(main_txt, width=22)
-    line_h = 88
+    lines = textwrap.wrap(main_txt, width=20)
+    if not lines:
+        lines = [main_txt[:20]]
+
+    line_h = 90
     total_h = len(lines) * line_h
-    sy = (h - total_h) // 2 - 20 + oy
+    sy = (H - total_h) // 2 - 30 + oy
 
     for i, line in enumerate(lines):
-        bb = draw.textbbox((0, 0), line, font=fl)
-        tw = bb[2] - bb[0]
-        x = (w - tw) // 2 + ox
+        try:
+            bb = draw.textbbox((0, 0), line, font=fl)
+            tw = bb[2] - bb[0]
+        except:
+            tw = len(line) * 40
+
+        x = max(40, (W - tw) // 2 + ox)
         y = sy + i * line_h
-        sc = tuple(max(0, int(c * 0.25 * alpha)) for c in tc)
-        draw.text((x + 3, y + 3), line, font=fl, fill=sc)
-        draw.text((x, y), line, font=fl, fill=tuple(int(c * alpha) for c in tc))
 
-    # Draw subtitle
+        # Shadow
+        sc = tuple(max(0, int(c * 0.2 * alpha)) for c in tc)
+        draw.text((x + 4, y + 4), line, font=fl, fill=sc)
+
+        # Main text
+        draw.text((x, y), line, font=fl,
+                  fill=tuple(max(0, min(255, int(c * alpha))) for c in tc))
+
+    # Subtitle
     if sub_txt:
-        sub_disp = sub_txt[:65]
-        bb = draw.textbbox((0, 0), sub_disp, font=fm)
-        sw = bb[2] - bb[0]
-        sx2 = (w - sw) // 2
-        sy2 = sy + len(lines) * line_h + 22
-        draw.text((sx2, sy2), sub_disp, font=fm, fill=tuple(max(0, int(c * 0.75 * alpha)) for c in ac))
+        disp = sub_txt[:60]
+        try:
+            bb = draw.textbbox((0, 0), disp, font=fm)
+            sw = bb[2] - bb[0]
+        except:
+            sw = len(disp) * 20
 
-    # Progress bar bottom
-    bar_w = int(w * prog)
-    draw.rectangle([0, h - 20, bar_w, h - 16], fill=tuple(int(c * 0.6) for c in tc))
+        sx2 = max(20, (W - sw) // 2)
+        sy2 = sy + len(lines) * line_h + 25
+        sub_col = tuple(max(0, min(255, int(c * 0.75 * alpha))) for c in ac)
+        draw.text((sx2, sy2), disp, font=fm, fill=sub_col)
 
-    # Particle dots (decorative)
-    import random
-    rng = random.Random(frame_num // 3)
-    for _ in range(12):
-        px = rng.randint(20, w - 20)
-        py = rng.randint(20, h - 20)
-        pr = rng.randint(1, 3)
-        pa = rng.random() * 0.3 * alpha
-        pc = tuple(int(c * pa) for c in tc)
-        draw.ellipse([px - pr, py - pr, px + pr, py + pr], fill=pc)
+    # Bottom progress bar
+    bar_w = max(1, int(W * prog))
+    bar_col = tuple(max(0, min(255, int(c * 0.55))) for c in tc)
+    draw.rectangle([0, H - 18, bar_w, H - 14], fill=bar_col)
 
     return np.array(img)
 
 
 # ============================================================
-# Video Generator
+# VIDEO GENERATOR - imageio + ffmpeg
 # ============================================================
 def generate_video(scene_data, out_path):
     try:
-        from moviepy.editor import VideoClip, concatenate_videoclips
+        import imageio
+        import imageio_ffmpeg
 
         fps = 24
-        clips = []
+        ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
 
+        # Generate all frames as temp images
+        frames_dir = out_path + "_frames"
+        os.makedirs(frames_dir, exist_ok=True)
+
+        frame_count = 0
+        frame_list_path = os.path.join(frames_dir, "frames.txt")
+
+        # Write frames
         for scene in scene_data["scenes"]:
-            dur = scene.get("duration", 4)
-            total_f = int(dur * fps)
+            dur = int(scene.get("duration", 4))
+            total_f = dur * fps
 
-            def make_frame(t, s=scene, tf=total_f):
-                return create_frame(s, int(t * fps), tf)
+            for f in range(total_f):
+                arr = create_frame(scene, f, total_f)
+                img = Image.fromarray(arr.astype(np.uint8))
+                frame_path = os.path.join(frames_dir, f"frame_{frame_count:06d}.jpg")
+                img.save(frame_path, quality=85)
+                frame_count += 1
 
-            clips.append(VideoClip(make_frame, duration=dur))
+        # Use ffmpeg to create video from frames
+        cmd = [
+            ffmpeg_path,
+            "-y",
+            "-framerate", str(fps),
+            "-i", os.path.join(frames_dir, "frame_%06d.jpg"),
+            "-c:v", "libx264",
+            "-pix_fmt", "yuv420p",
+            "-crf", "23",
+            "-preset", "fast",
+            out_path
+        ]
 
-        final = concatenate_videoclips(clips, method="compose")
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
 
-        # Try audio
+        if result.returncode != 0:
+            print(f"FFmpeg error: {result.stderr}")
+            raise Exception(f"FFmpeg failed: {result.stderr[-500:]}")
+
+        # Try adding audio
         try:
             from gtts import gTTS
-            all_text = " ".join(
-                sc.get("text", "") + ". " + sc.get("subtitle", "")
+            all_text = ". ".join(
+                sc.get("text", "") + " " + sc.get("subtitle", "")
                 for sc in scene_data["scenes"]
-            )[:600]
-            audio_path = out_path.replace(".mp4", "_aud.mp3")
+            )[:500]
+
+            audio_path = out_path + ".mp3"
             gTTS(text=all_text, lang='en', slow=False).save(audio_path)
-            from moviepy.editor import AudioFileClip
-            audio = AudioFileClip(audio_path)
-            if audio.duration < final.duration:
-                audio = audio.audio_loop(duration=final.duration)
-            else:
-                audio = audio.subclip(0, final.duration)
-            final = final.set_audio(audio)
+
+            out_with_audio = out_path.replace(".mp4", "_final.mp4")
+            audio_cmd = [
+                ffmpeg_path,
+                "-y",
+                "-i", out_path,
+                "-i", audio_path,
+                "-c:v", "copy",
+                "-c:a", "aac",
+                "-shortest",
+                out_with_audio
+            ]
+            ar = subprocess.run(audio_cmd, capture_output=True, text=True, timeout=120)
+            if ar.returncode == 0 and os.path.exists(out_with_audio):
+                os.replace(out_with_audio, out_path)
+            if os.path.exists(audio_path):
+                os.remove(audio_path)
         except Exception as ae:
-            print(f"Audio skip: {ae}")
+            print(f"Audio skipped: {ae}")
 
-        final.write_videofile(out_path, fps=fps, codec='libx264',
-                              audio_codec='aac', verbose=False, logger=None)
-
+        # Cleanup frames
         try:
-            ap = out_path.replace(".mp4", "_aud.mp3")
-            if os.path.exists(ap): os.remove(ap)
+            import shutil
+            shutil.rmtree(frames_dir, ignore_errors=True)
         except:
             pass
 
-        return True
+        return os.path.exists(out_path) and os.path.getsize(out_path) > 1000
 
     except Exception as e:
-        print(f"Video error: {e}")
+        print(f"Video generation error: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
 # ============================================================
-# Routes
+# ROUTES
 # ============================================================
 @app.route("/")
 def index():
-    return HTML, 200, {"Content-Type": "text/html"}
+    return HTML, 200, {"Content-Type": "text/html; charset=utf-8"}
 
 
 @app.route("/generate", methods=["POST"])
@@ -733,23 +738,30 @@ def generate():
         return jsonify({"error": "Prompt required"}), 400
 
     try:
+        print(f"Generating video for: {prompt[:60]}")
         scene_data = get_ai_response(prompt, api_cfg)
+        print(f"Scenes: {len(scene_data.get('scenes', []))}")
+
         vid_id = str(uuid.uuid4())[:8]
         vid_name = f"vid_{vid_id}.mp4"
         vid_path = os.path.join(VIDEOS_DIR, vid_name)
 
         ok = generate_video(scene_data, vid_path)
+        print(f"Video generated: {ok}, exists: {os.path.exists(vid_path)}")
 
-        if ok and os.path.exists(vid_path):
+        if ok:
             return jsonify({
                 "success": True,
                 "video_url": f"/video/{vid_name}",
                 "title": scene_data.get("title", "Generated Video"),
                 "scenes": len(scene_data.get("scenes", []))
             })
-        return jsonify({"error": "Video render failed"}), 500
+
+        return jsonify({"error": "Video render failed. Check server logs."}), 500
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 
@@ -762,14 +774,30 @@ def serve_video(fname):
 def test_api():
     cfg = request.json.get("api_config", {})
     try:
-        res = get_ai_response("2-scene test video about stars", cfg)
+        res = get_ai_response("simple 2 scene video about stars", cfg)
         if res and "scenes" in res:
             return jsonify({"success": True, "message": "Connected successfully!"})
-        return jsonify({"success": False, "message": "Invalid response from API"})
+        return jsonify({"success": False, "message": "Invalid API response"})
     except Exception as e:
         return jsonify({"success": False, "message": str(e)})
 
 
+@app.route("/health")
+def health():
+    try:
+        import imageio_ffmpeg
+        ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+        ffmpeg_ok = os.path.exists(ffmpeg)
+    except:
+        ffmpeg_ok = False
+    return jsonify({
+        "status": "ok",
+        "ffmpeg": ffmpeg_ok,
+        "videos_dir": os.path.exists(VIDEOS_DIR)
+    })
+
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
+    print(f"Starting on port {port}")
     app.run(host="0.0.0.0", port=port, debug=False)
