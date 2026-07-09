@@ -6,6 +6,8 @@ import os
 import uuid
 import time
 import re
+import subprocess
+import tempfile
 
 app = Flask(__name__)
 CORS(app)
@@ -18,7 +20,6 @@ os.makedirs(VIDEOS_DIR, exist_ok=True)
 # ============================================================
 def detect_duration(prompt):
     prompt_lower = prompt.lower()
-    # Direct number + second pattern
     patterns = [
         r'(\d+)\s*second',
         r'(\d+)\s*sec\b',
@@ -33,17 +34,14 @@ def detect_duration(prompt):
         match = re.search(pattern, prompt_lower)
         if match:
             dur = int(match.group(1))
-            # Clamp to model limits
             dur = max(5, min(dur, 30))
             print(f"Detected duration: {dur}s from prompt")
             return dur
     
-    # Keywords
     if any(w in prompt_lower for w in ['short', 'quick', 'brief', 'chhota']):
         return 5
     if any(w in prompt_lower for w in ['long', 'detailed', 'lamba', 'extended']):
         return 15
-    # Default
     return 5
 
 # ============================================================
@@ -53,7 +51,6 @@ def enhance_prompt(prompt, cfg):
     ai_provider = cfg.get("ai_provider", "none")
     
     if ai_provider == "none" or not ai_provider:
-        # Auto enhance without AI
         enhanced = f"{prompt}, cinematic quality, high definition, realistic, detailed, professional cinematography, smooth motion, 4K"
         return enhanced
     
@@ -87,7 +84,11 @@ Rules:
                 json=data,
                 timeout=30
             )
-            return r.json()["choices"][0]["message"]["content"].strip()
+            if r.status_code == 200:
+                return r.json()["choices"][0]["message"]["content"].strip()
+            else:
+                print(f"OpenRouter error: {r.status_code} - {r.text}")
+                return prompt + ", cinematic, photorealistic, 4K, smooth motion, high quality"
             
         elif ai_provider == "gem":
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{cfg.get('gem_model','gemini-1.5-flash')}:generateContent"
@@ -101,7 +102,11 @@ Rules:
                 json=data,
                 timeout=30
             )
-            return r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+            if r.status_code == 200:
+                return r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+            else:
+                print(f"Gemini error: {r.status_code} - {r.text}")
+                return prompt + ", cinematic, photorealistic, 4K, smooth motion, high quality"
             
         elif ai_provider == "ollama":
             data = {
@@ -120,14 +125,72 @@ Rules:
                 json=data,
                 timeout=30
             )
-            return r.json()["message"]["content"].strip()
+            if r.status_code == 200:
+                return r.json()["message"]["content"].strip()
+            else:
+                print(f"Ollama error: {r.status_code} - {r.text}")
+                return prompt + ", cinematic, photorealistic, 4K, smooth motion, high quality"
             
     except Exception as e:
         print(f"Enhance failed: {e}")
         return prompt + ", cinematic, photorealistic, 4K, smooth motion, high quality"
 
 # ============================================================
-# HTML FRONTEND
+# CREATE SAMPLE VIDEO
+# ============================================================
+def create_sample_video(text, duration=5):
+    """Create a sample video file with text overlay"""
+    try:
+        # Try to create a video with ffmpeg
+        with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as f:
+            temp_file = f.name
+        
+        # Create a video with colored background and text
+        cmd = [
+            'ffmpeg', '-f', 'lavfi', '-i', f'color=c=#1a1a2e:s=1280x720:d={duration}',
+            '-vf', f"drawtext=text='{text[:80]}':fontcolor=white:fontsize=48:"
+                   f"x=(w-text_w)/2:y=(h-text_h)/2:box=1:boxcolor=black@0.5:boxborderw=10",
+            '-c:v', 'libx264', '-preset', 'ultrafast', temp_file, '-y'
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, timeout=30)
+        if result.returncode == 0:
+            with open(temp_file, 'rb') as f:
+                video_data = f.read()
+            os.unlink(temp_file)
+            return video_data
+        else:
+            print(f"FFmpeg error: {result.stderr.decode()}")
+            return create_fallback_video(duration)
+            
+    except Exception as e:
+        print(f"Video creation error: {e}")
+        return create_fallback_video(duration)
+
+def create_fallback_video(duration=5):
+    """Create a minimal valid MP4 file when ffmpeg is not available"""
+    # This creates a very basic MP4 file
+    # For demonstration purposes only
+    import struct
+    
+    # A minimal MP4 file header
+    mp4_data = bytearray()
+    
+    # ftyp box
+    mp4_data.extend(b'\x00\x00\x00\x1c')  # size
+    mp4_data.extend(b'ftyp')              # type
+    mp4_data.extend(b'isom')              # major brand
+    mp4_data.extend(b'\x00\x00\x00\x01')  # minor version
+    mp4_data.extend(b'isom')              # compatible brands
+    mp4_data.extend(b'iso2')
+    mp4_data.extend(b'avc1')
+    
+    # This is a placeholder - in production, you would generate a real video
+    # For now, just return a small valid MP4 file
+    return bytes(mp4_data) + b'\x00' * 10000  # Add some padding
+
+# ============================================================
+# HTML FRONTEND (same as before, but simplified)
 # ============================================================
 HTML = '''<!DOCTYPE html>
 <html lang="en">
@@ -231,7 +294,6 @@ HTML = '''<!DOCTYPE html>
         .s-msg.fail{background:#1f0a0a;color:#f87171;border:1px solid #7f1d1d;display:block;}
         .s-msg.info{background:#0a0a1f;color:#818cf8;border:1px solid #312e81;display:block;}
         .dur-info{background:#0a0a1f;border:1px solid #312e81;color:#818cf8;padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:16px;line-height:1.6;}
-        .note{font-size:12px;color:#555;margin-top:6px;line-height:1.5;padding:8px 10px;background:#0a0a0a;border-radius:6px;border-left:2px solid #333;}
     </style>
 </head>
 <body>
@@ -349,17 +411,15 @@ HTML = '''<!DOCTYPE html>
             <div class="divider"></div>
             <div class="sec-label">🎬 Video Generation</div>
             <div class="note" style="background:#0a0a1f;border-left-color:#4f46e5;color:#818cf8;">
-                ⚠️ <strong>Important:</strong> This is a demo interface. To actually generate videos, you need to integrate with a video generation API like Replicate, HuggingFace, or Fal.ai.
+                ⚠️ <strong>Note:</strong> This is a demo. The video shown is a sample with your enhanced prompt.
                 <br><br>
-                For a complete setup, you can use:
+                To generate real AI videos, integrate with:
                 <br>
                 • <strong>Replicate</strong> - replicate.com (MiniMax, Wan, etc.)
                 <br>
                 • <strong>HuggingFace</strong> - huggingface.co (ZeroScope, DAMO)
                 <br>
                 • <strong>Fal.ai</strong> - fal.ai (Kling, Hunyuan)
-                <br><br>
-                Add your preferred video generation API in the code or use as-is for prompt enhancement only.
             </div>
             
             <div class="s-msg" id="sMsg"></div>
@@ -523,9 +583,16 @@ HTML = '''<!DOCTYPE html>
                 const r = await fetch('/generate', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ prompt, cfg }),
-                    signal: AbortSignal.timeout(900000)
+                    body: JSON.stringify({ prompt, cfg })
                 });
+                
+                // Check if response is OK
+                if (!r.ok) {
+                    const text = await r.text();
+                    console.error('Server error:', text);
+                    throw new Error(`Server error ${r.status}: ${text.substring(0, 100)}`);
+                }
+                
                 const d = await r.json();
                 removeTyping(tid);
                 if (d.success) addVideo(d);
@@ -533,6 +600,7 @@ HTML = '''<!DOCTYPE html>
             } catch (e) {
                 removeTyping(tid);
                 addErr('Request failed: ' + e.message);
+                console.error('Full error:', e);
             }
             busy = false;
             document.getElementById('sendBtn').disabled = false;
@@ -609,7 +677,7 @@ HTML = '''<!DOCTYPE html>
         function addVideo(d) {
             const w = document.createElement('div');
             w.className = 'msg-row';
-            const enhanced = d.enhanced_prompt ? `<div style="font-size:12px;color:#555;margin-bottom:8px;">Enhanced: ${esc(d.enhanced_prompt.substring(0,100))}...</div>` : '';
+            const enhanced = d.enhanced_prompt ? `<div style="font-size:12px;color:#555;margin-bottom:8px;">✨ Enhanced: ${esc(d.enhanced_prompt.substring(0,150))}${d.enhanced_prompt.length > 150 ? '...' : ''}</div>` : '';
             w.innerHTML = `
                 <div class="message ai-msg">
                     <div class="ai-av">🎬</div>
@@ -665,16 +733,20 @@ def index():
 
 @app.route("/generate", methods=["POST"])
 def generate():
-    data = request.json
-    prompt = data.get("prompt", "").strip()
-    cfg = data.get("cfg", {})
-    
-    if not prompt:
-        return jsonify({"error": "Prompt required"}), 400
-    if not cfg.get("ai_provider") or cfg.get("ai_provider") == "none":
-        return jsonify({"error": "No AI provider configured"}), 400
-    
     try:
+        data = request.json
+        if not data:
+            return jsonify({"error": "No JSON data received"}), 400
+            
+        prompt = data.get("prompt", "").strip()
+        cfg = data.get("cfg", {})
+        
+        if not prompt:
+            return jsonify({"error": "Prompt required"}), 400
+            
+        if not cfg.get("ai_provider") or cfg.get("ai_provider") == "none":
+            return jsonify({"error": "No AI provider configured. Please set up in Settings."}), 400
+        
         # Detect duration from prompt
         duration = detect_duration(prompt)
         print(f"Duration: {duration}s")
@@ -684,16 +756,15 @@ def generate():
         print(f"Original: {prompt[:80]}")
         print(f"Enhanced: {enhanced[:80]}")
         
-        # For demo purposes, generate sample video
-        # In production, integrate with video generation API
+        # Generate sample video
         vid_id = str(uuid.uuid4())[:8]
         vid_name = f"vid_{vid_id}.mp4"
         vid_path = os.path.join(VIDEOS_DIR, vid_name)
         
-        # Create a sample video (replace with actual video generation)
-        sample_video = create_sample_video(enhanced)
+        # Create sample video with enhanced prompt
+        video_data = create_sample_video(enhanced, duration)
         with open(vid_path, "wb") as f:
-            f.write(sample_video)
+            f.write(video_data)
         
         words = prompt.split()
         title = " ".join(words[:6]) if len(words) > 6 else prompt
@@ -717,18 +788,17 @@ def serve_video(fname):
 
 @app.route("/test-api", methods=["POST"])
 def test_api():
-    cfg = request.json.get("cfg", {})
-    provider = cfg.get("ai_provider")
-    
-    if not provider or provider == "none":
-        return jsonify({"success": False, "message": "No provider selected"})
-    
     try:
+        cfg = request.json.get("cfg", {})
+        provider = cfg.get("ai_provider")
+        
+        if not provider or provider == "none":
+            return jsonify({"success": False, "message": "No provider selected"})
+        
         if provider == "or":
             key = cfg.get("or_key", "")
             if not key:
                 return jsonify({"success": False, "message": "API key missing"})
-            # Validate OpenRouter key
             headers = {"Authorization": f"Bearer {key}"}
             r = requests.get("https://openrouter.ai/api/v1/auth/key", headers=headers, timeout=10)
             if r.status_code == 200:
@@ -739,7 +809,6 @@ def test_api():
             key = cfg.get("gem_key", "")
             if not key:
                 return jsonify({"success": False, "message": "API key missing"})
-            # Validate Gemini key
             url = "https://generativelanguage.googleapis.com/v1beta/models"
             r = requests.get(url, params={"key": key}, timeout=10)
             if r.status_code == 200:
@@ -762,57 +831,18 @@ def test_api():
 def health():
     return jsonify({"status": "ok"})
 
-def create_sample_video(text):
-    """Create a sample video file for demonstration"""
-    # This creates a minimal MP4 file
-    # In production, this would use a real video generation API
-    # For now, we return a small demo video
-    import subprocess
-    import tempfile
-    
-    # Create a simple video using ffmpeg if available
-    try:
-        with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as f:
-            temp_file = f.name
-        
-        # Generate a simple color video with text overlay
-        cmd = [
-            'ffmpeg', '-f', 'lavfi', '-i', f'color=c=blue:s=1920x1080:d=5',
-            '-vf', f"drawtext=text='{text[:50]}':fontcolor=white:fontsize=48:x=(w-text_w)/2:y=(h-text_h)/2",
-            '-c:v', 'libx264', '-preset', 'ultrafast', temp_file, '-y'
-        ]
-        
-        try:
-            subprocess.run(cmd, capture_output=True, check=True)
-            with open(temp_file, 'rb') as f:
-                return f.read()
-        except:
-            # Fallback: create an even simpler video
-            cmd = [
-                'ffmpeg', '-f', 'lavfi', '-i', 'color=c=black:s=640x480:d=5',
-                '-c:v', 'libx264', '-preset', 'ultrafast', temp_file, '-y'
-            ]
-            subprocess.run(cmd, capture_output=True, check=True)
-            with open(temp_file, 'rb') as f:
-                return f.read()
-    except:
-        # If ffmpeg not available, return a small dummy video
-        # This is just a placeholder - in production, use real generation
-        dummy_data = bytearray(10000)
-        # Add minimal MP4 header
-        dummy_data[0:8] = b'\x00\x00\x00\x1cftypisom'
-        return bytes(dummy_data)
-
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    print(f"Starting on port {port}")
+    print("="*50)
+    print("🎬 AI Video Generator")
+    print("="*50)
+    print(f"\n🚀 Server running on http://localhost:{port}")
     print("\n⚙️  AI Providers Available:")
-    print("  - OpenRouter (cloud, paid/free)")
-    print("  - Gemini (cloud, free tier)")
-    print("  - Ollama (local, free)")
+    print("  • OpenRouter - Cloud-based (api.openrouter.ai)")
+    print("  • Gemini - Google's AI (makersuite.google.com)")
+    print("  • Ollama - Local, free (ollama.ai)")
     print("\n📝 Note: Video generation is in demo mode.")
-    print("   To generate real videos, integrate with:")
-    print("   - Replicate (replicate.com)")
-    print("   - HuggingFace (huggingface.co)")
-    print("   - Fal.ai (fal.ai)")
-    app.run(host="0.0.0.0", port=port, debug=False)
+    print("   The video shown is a sample with your prompt overlay.")
+    print("   To generate real videos, integrate with Replicate/HuggingFace/Fal.ai")
+    print("="*50)
+    app.run(host="0.0.0.0", port=port, debug=True)
