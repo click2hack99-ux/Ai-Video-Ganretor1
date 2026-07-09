@@ -1,7 +1,8 @@
 flask
 flask-cors
 requests
-moviepy
 Pillow
 numpy
 gtts
+imageio[ffmpeg]
+imageio-ffmpeg
