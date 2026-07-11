@@ -184,7 +184,11 @@ def fallback(message):
 # ==========================================
 @app.route('/')
 def home():
-    return "Bot is running!"
+    return """
+    <h1>🤖 Aadhaar PDF Bot is LIVE!</h1>
+    <p>Bot is running successfully on port 5000</p>
+    <p>Send a 10-digit mobile number to @your_bot_username on Telegram</p>
+    """
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -196,18 +200,25 @@ def webhook():
     return 'Bad Request', 400
 
 # ==========================================
-# MAIN ENTRY
+# MAIN ENTRY - FORCED PORT 5000
 # ==========================================
 if __name__ == "__main__":
-    # Webhook set karo (Render pe)
-    WEBHOOK_URL = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME', 'your-app.onrender.com')}/webhook"
+    # Webhook set karo
+    RENDER_URL = os.environ.get('RENDER_EXTERNAL_URL', 'https://your-app.onrender.com')
+    WEBHOOK_URL = f"{RENDER_URL}/webhook"
     
     # Bot ko webhook pe set karo
-    bot.remove_webhook()
-    time.sleep(1)
-    bot.set_webhook(url=WEBHOOK_URL)
+    try:
+        bot.remove_webhook()
+        time.sleep(1)
+        bot.set_webhook(url=WEBHOOK_URL)
+        print(f"✅ Webhook set to: {WEBHOOK_URL}")
+    except Exception as e:
+        print(f"⚠️ Webhook error: {e}")
     
-    print(f"✅ Webhook set to: {WEBHOOK_URL}")
+    # PORT ko force karo 5000
+    port = 5000
+    print(f"🚀 Starting bot on port {port}...")
     
-    # Flask server start
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+    # Flask server start - hamesha port 5000
+    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
