@@ -1,10 +1,16 @@
+#!/usr/bin/env python3
+# Aadhaar PDF Bot - With Auto Retry & Polling Thread
+# Powered by Click 2 Hack
+
 import requests
 import json
 import os
 import time
 import telebot
-from flask import Flask, request
+import re
 import threading
+from flask import Flask, request
+from datetime import datetime
 
 # ==========================================
 # CONFIGURATION
@@ -12,14 +18,31 @@ import threading
 BOT_TOKEN = "8635537345:AAHy2OCc2Fh40eMcPSy3VV5aZXf6x2vL_JQ"
 API_KEY = "demo"
 DOMAIN = "https://antifiednullxosint.com"
+ADMIN_ID = 8475582345
+
+# 📢 Force join channels (optional)
+CHANNELS = ["@Click2Hackk", "@c2hget"]
 
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
 
-# ==========================================
-# SESSION STORAGE
-# ==========================================
+bot_running = True
+last_activity = datetime.now()
 user_sessions = {}
+
+# ==========================================
+# CHECK JOIN (optional)
+# ==========================================
+def is_joined(user_id):
+    for ch in CHANNELS:
+        try:
+            member = bot.get_chat_member(ch, user_id)
+            if member.status in ["left", "kicked"]:
+                return False
+        except Exception as e:
+            print(f"Error checking channel {ch}: {e}")
+            return False
+    return True
 
 # ==========================================
 # CORE API CLIENT
@@ -65,28 +88,44 @@ client = AntifiedNullClient(DOMAIN, API_KEY)
 
 @bot.message_handler(commands=['start', 'help'])
 def start(message):
+    user_id = message.from_user.id
+    if not is_joined(user_id):
+        text = "🚫 कृपया पहले हमारे दोनों चैनल जॉइन करें:\n\n"
+        for ch in CHANNELS:
+            text += f"👉 https://t.me/{ch.replace('@','')}\n"
+        text += "\n✅ दोनों चैनल जॉइन करने के बाद /start दोबारा भेजें।"
+        return bot.reply_to(message, text)
+    
     bot.reply_to(message, 
-        "👋 *Welcome to Aadhaar PDF Generator Bot*\n\n"
-        "Send me a 10-digit mobile number to start.\n"
-        "Example: `9876543210`\n\n"
-        "Or type /help for instructions.",
+        "👋 *Aadhaar PDF Generator Bot*\n\n"
+        "📱 बस 10 अंकों का मोबाइल नंबर भेजें (जैसे: `9876543210`)\n\n"
+        "⚡ फिर OTP भेजकर PDF प्राप्त करें",
         parse_mode='Markdown'
     )
 
 @bot.message_handler(func=lambda msg: msg.text and msg.text.strip().isdigit() and len(msg.text.strip()) == 10)
 def handle_mobile(message):
+    user_id = message.from_user.id
     chat_id = message.chat.id
+    
+    if not is_joined(user_id):
+        text = "🚫 कृपया पहले हमारे दोनों चैनल जॉइन करें:\n\n"
+        for ch in CHANNELS:
+            text += f"👉 https://t.me/{ch.replace('@','')}\n"
+        text += "\n✅ जॉइन करने के बाद दोबारा नंबर भेजें।"
+        return bot.reply_to(message, text)
+    
     mobile = message.text.strip()
     
     bot.send_chat_action(chat_id, 'typing')
-    msg = bot.reply_to(message, f"🔄 Processing mobile: `{mobile}` ...", parse_mode='Markdown')
+    status_msg = bot.reply_to(message, f"⏳ `{mobile}` पर कार्य हो रहा है...", parse_mode='Markdown')
     
     res = client.init_phase1(mobile)
     
     if "process_id" not in res:
         bot.edit_message_text(
             f"❌ Error: {res.get('detail', 'Unknown error')}",
-            chat_id, msg.message_id
+            chat_id, status_msg.message_id
         )
         return
     
@@ -98,11 +137,11 @@ def handle_mobile(message):
     }
     
     bot.edit_message_text(
-        f"✅ OTP sent to mobile.\n\n"
+        f"✅ OTP भेज दिया गया है!\n\n"
         f"📌 Process ID: `{process_id}`\n"
         f"📌 Status: {res.get('message', 'OTP sent')}\n\n"
-        f"✉️ Reply with **OTP 1 (EID OTP)**",
-        chat_id, msg.message_id,
+        f"✉️ अब **OTP 1 (EID OTP)** भेजें",
+        chat_id, status_msg.message_id,
         parse_mode='Markdown'
     )
 
@@ -114,14 +153,14 @@ def handle_otp1(message):
     process_id = session['process_id']
     
     bot.send_chat_action(chat_id, 'typing')
-    msg = bot.reply_to(message, "🔄 Verifying OTP 1 ...")
+    status_msg = bot.reply_to(message, "⏳ OTP 1 वेरिफाई हो रहा है...")
     
     res = client.verify_phase1(process_id, otp1)
     
     if "original_name" not in res:
         bot.edit_message_text(
             f"❌ Error: {res.get('detail', 'Invalid OTP')}",
-            chat_id, msg.message_id
+            chat_id, status_msg.message_id
         )
         return
     
@@ -133,12 +172,12 @@ def handle_otp1(message):
     session['eid'] = eid
     
     bot.edit_message_text(
-        f"✅ OTP 1 Verified!\n\n"
-        f"👤 Name: `{name}`\n"
+        f"✅ OTP 1 वेरिफाई हो गया!\n\n"
+        f"👤 नाम: `{name}`\n"
         f"🆔 EID: `{eid}`\n"
         f"📌 Status: {res.get('message', 'Verified')}\n\n"
-        f"✉️ Reply with **OTP 2 (Download OTP)**",
-        chat_id, msg.message_id,
+        f"✉️ अब **OTP 2 (Download OTP)** भेजें",
+        chat_id, status_msg.message_id,
         parse_mode='Markdown'
     )
 
@@ -151,7 +190,7 @@ def handle_otp2(message):
     name = session['name']
     
     bot.send_chat_action(chat_id, 'upload_document')
-    msg = bot.reply_to(message, "🔄 Generating PDF...")
+    status_msg = bot.reply_to(message, "⏳ PDF जनरेट हो रहा है...")
     
     safe_name = "".join(c for c in name if c.isalnum())
     pdf_name = f"{safe_name}_Unlocked_Aadhaar.pdf"
@@ -160,65 +199,76 @@ def handle_otp2(message):
     
     if res.get("status") == "success":
         with open(pdf_name, 'rb') as f:
-            bot.send_document(chat_id, f, caption=f"✅ PDF Generated!\n👤 Name: {name}\n📁 File: {pdf_name}")
+            bot.send_document(chat_id, f, caption=f"✅ PDF जनरेट हो गया!\n👤 नाम: {name}\n📁 File: {pdf_name}")
         
-        bot.delete_message(chat_id, msg.message_id)
+        bot.delete_message(chat_id, status_msg.message_id)
         os.remove(pdf_name)
         del user_sessions[chat_id]
     else:
         bot.edit_message_text(
             f"❌ Error: {res.get('detail', 'Failed to generate PDF')}",
-            chat_id, msg.message_id
+            chat_id, status_msg.message_id
         )
 
 @bot.message_handler(func=lambda msg: True)
 def fallback(message):
     bot.reply_to(message, 
         "⚠️ Invalid input.\n"
-        "Send a valid **10-digit mobile number** to start.\n"
-        "Or type /help for instructions."
+        "10 अंकों का मोबाइल नंबर भेजें (जैसे: `9876543210`)\n"
+        "या /help देखें।",
+        parse_mode='Markdown'
     )
 
 # ==========================================
-# FLASK WEBHOOK (Render ke liye)
+# FLASK ROUTES (Render Health Check)
 # ==========================================
 @app.route('/')
 def home():
-    return """
-    <h1>🤖 Aadhaar PDF Bot is LIVE!</h1>
-    <p>Bot is running successfully on port 5000</p>
-    <p>Send a 10-digit mobile number to @your_bot_username on Telegram</p>
-    """
+    return {
+        "status": "Aadhaar PDF Bot is running",
+        "api": DOMAIN,
+        "features": ["Mobile number lookup", "OTP verification", "PDF generation"]
+    }, 200
 
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    if request.headers.get('content-type') == 'application/json':
-        json_string = request.get_data().decode('utf-8')
-        update = telebot.types.Update.de_json(json_string)
-        bot.process_new_updates([update])
-        return 'OK', 200
-    return 'Bad Request', 400
+@app.route('/health')
+def health():
+    return {"status": "healthy", "bot_running": bot_running}, 200
 
 # ==========================================
-# MAIN ENTRY - FORCED PORT 5000
+# POLLING THREAD (Exactly like your other bot)
+# ==========================================
+def run_bot_polling():
+    global bot_running
+    while bot_running:
+        try:
+            print("🔄 Bot polling started with AUTO DETECT...")
+            bot.remove_webhook()
+            bot.polling(none_stop=True, interval=1, timeout=30)
+        except Exception as e:
+            print(f"❌ Polling error: {e}")
+            if bot_running:
+                print("🔄 Restarting in 10 seconds...")
+                time.sleep(10)
+
+# ==========================================
+# MAIN ENTRY
 # ==========================================
 if __name__ == "__main__":
-    # Webhook set karo
-    RENDER_URL = os.environ.get('RENDER_EXTERNAL_URL', 'https://your-app.onrender.com')
-    WEBHOOK_URL = f"{RENDER_URL}/webhook"
+    port = int(os.environ.get("PORT", 5000))
     
-    # Bot ko webhook pe set karo
-    try:
-        bot.remove_webhook()
-        time.sleep(1)
-        bot.set_webhook(url=WEBHOOK_URL)
-        print(f"✅ Webhook set to: {WEBHOOK_URL}")
-    except Exception as e:
-        print(f"⚠️ Webhook error: {e}")
+    print("="*50)
+    print("🤖 AADHAAR PDF BOT - AUTO DETECT")
+    print("="*50)
+    print(f"✅ Domain: {DOMAIN}")
+    print(f"✅ API Key: {API_KEY}")
+    print(f"✅ Auto Phone Detect: सीधा नंबर भेजो")
+    print(f"✅ Force Join: {CHANNELS}")
+    print("="*50)
     
-    # PORT ko force karo 5000
-    port = 5000
-    print(f"🚀 Starting bot on port {port}...")
+    # Polling thread start karo (exactly like your other bot)
+    polling_thread = threading.Thread(target=run_bot_polling)
+    polling_thread.daemon = True
+    polling_thread.start()
     
-    # Flask server start - hamesha port 5000
-    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+    # Flask server start - port 5000 pe
+    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
