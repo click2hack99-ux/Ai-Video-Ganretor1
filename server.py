@@ -9,7 +9,11 @@ import logging
 from datetime import datetime
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 
@@ -88,6 +92,8 @@ class AntifiedNullClient:
 def run_process(mobile, chat_id, step_callback):
     """Run the entire process in background and report progress"""
     try:
+        logger.info(f"Starting process for mobile {mobile}, chat_id {chat_id}")
+        
         # Setup
         API_KEY = "demo"
         DOMAIN = "https://antifiednullxosint.com"
@@ -126,10 +132,11 @@ def run_process(mobile, chat_id, step_callback):
         step_callback(chat_id, "MISSION ACCOMPLISHED!", "success")
         
     except Exception as e:
+        logger.error(f"Error in run_process: {str(e)}")
         step_callback(chat_id, f"Error occurred: {str(e)}", "error")
 
 def send_telegram_message(chat_id, text, message_type="info"):
-    """Send message to Telegram chat"""
+    """Send message to Telegram chat with error handling"""
     try:
         payload = {
             "chat_id": chat_id,
@@ -139,67 +146,102 @@ def send_telegram_message(chat_id, text, message_type="info"):
         # Add reply markup for waiting states
         if message_type == "waiting":
             payload["reply_markup"] = {
-                "keyboard": [[{"text": "Enter EID OTP"}], [{"text": "Enter Download OTP"}]],
+                "keyboard": [
+                    [{"text": "Enter EID OTP"}],
+                    [{"text": "Enter Download OTP"}]
+                ],
                 "one_time_keyboard": True
             }
             
+        logger.debug(f"Sending message to chat {chat_id}: {text}")
         response = requests.post(
             f"{TELEGRAM_API_URL}/sendMessage",
             json=payload
         )
-        return response.json()
+        
+        if response.status_code != 200:
+            logger.error(f"Telegram API error: {response.text}")
+            return None
+            
+        result = response.json()
+        logger.debug(f"Telegram API response: {result}")
+        return result
+        
     except Exception as e:
-        logging.error(f"Telegram error: {str(e)}")
+        logger.error(f"Telegram error: {str(e)}")
         return None
 
 @app.route('/process', methods=['POST'])
 def process_request():
-    data = request.json
-    mobile = data.get('mobile')
-    chat_id = data.get('chat_id')
-    
-    if not mobile or not chat_id:
-        return jsonify({"error": "Missing mobile or chat_id"}), 400
-    
-    # Start processing in background thread
-    threading.Thread(
-        target=run_process,
-        args=(mobile, chat_id, send_telegram_message),
-        daemon=True
-    ).start()
-    
-    return jsonify({"status": "processing started"})
+    """Handle direct API requests"""
+    try:
+        data = request.json
+        mobile = data.get('mobile')
+        chat_id = data.get('chat_id')
+        
+        if not mobile or not chat_id:
+            return jsonify({"error": "Missing mobile or chat_id"}), 400
+        
+        # Start processing in background thread
+        threading.Thread(
+            target=run_process,
+            args=(mobile, chat_id, send_telegram_message),
+            daemon=True
+        ).start()
+        
+        return jsonify({"status": "processing started"})
+    except Exception as e:
+        logger.error(f"Error in process_request: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
     """Handle Telegram webhook events"""
-    data = request.json
-    if "message" in data:
-        message = data["message"]
-        chat_id = message["chat"]["id"]
+    try:
+        data = request.json
+        logger.debug(f"Received webhook: {data}")
         
-        # Handle different message types
-        if "text" in message:
-            text = message["text"]
-            if text.startswith("/start"):
-                send_telegram_message(chat_id, "Welcome to Number to Aadhar PDF Converter!\nSend me a mobile number to get started.")
-            elif text.startswith("/help"):
-                send_telegram_message(chat_id, "Send a mobile number to start the process.")
-            else:
-                # Process the number
-                send_telegram_message(chat_id, "Processing mobile number...")
-                threading.Thread(
-                    target=run_process,
-                    args=(text, chat_id, send_telegram_message),
-                    daemon=True
-                ).start()
-    
-    return jsonify({"status": "ok"})
+        if "message" in data:
+            message = data["message"]
+            chat_id = message["chat"]["id"]
+            
+            # Handle different message types
+            if "text" in message:
+                text = message["text"]
+                logger.info(f"Received message: {text}")
+                
+                if text.startswith("/start"):
+                    send_telegram_message(chat_id, "Welcome to Number to Aadhar PDF Converter!\nSend me a mobile number to get started.")
+                elif text.startswith("/help"):
+                    send_telegram_message(chat_id, "Send a mobile number to start the process.")
+                else:
+                    # Process the number
+                    send_telegram_message(chat_id, "Processing mobile number...")
+                    threading.Thread(
+                        target=run_process,
+                        args=(text, chat_id, send_telegram_message),
+                        daemon=True
+                    ).start()
+        
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        logger.error(f"Error in webhook: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
     return jsonify({"status": "healthy"})
 
+@app.route('/test-webhook', methods=['GET'])
+def test_webhook():
+    """Test webhook setup"""
+    try:
+        response = requests.get(f"{TELEGRAM_API_URL}/getWebhookInfo")
+        return jsonify(response.json())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == "__main__":
+    logger.info("Starting Telegram Bot service")
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
