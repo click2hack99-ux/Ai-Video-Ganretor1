@@ -6,9 +6,6 @@ import time
 import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler, CallbackQueryHandler
-from flask import Flask
-import threading
-import signal
 
 # ==========================================
 # 1. UI COLORS & ASSETS
@@ -24,13 +21,6 @@ WAITING_MOBILE, WAITING_OTP1, WAITING_OTP2 = range(3)
 
 # Store user data temporarily
 user_data = {}
-
-# Flask app for keeping alive
-app = Flask(__name__)
-
-@app.route('/')
-def home():
-    return "Bot is running!"
 
 # ==========================================
 # 2. CORE API CLIENT
@@ -133,7 +123,6 @@ async def get_mobile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mobile = update.message.text.strip()
     user_id = update.effective_user.id
     
-    # Validate mobile number
     if not mobile.isdigit() or len(mobile) != 10:
         await update.message.reply_text(
             "❌ *Invalid mobile number!*\n\n"
@@ -143,17 +132,14 @@ async def get_mobile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return WAITING_MOBILE
     
-    # Send processing message
-    msg = await update.message.reply_text("🔄 *Initializing Phase 1...*\n⏳ Bypassing Captcha...", parse_mode='Markdown')
+    msg = await update.message.reply_text("🔄 *Initializing Phase 1...*", parse_mode='Markdown')
     
-    # Call API
     res1 = client.init_phase1(mobile)
     
     if "process_id" not in res1:
         await msg.edit_text(f"❌ *ERROR:* {res1.get('detail', res1)}", parse_mode='Markdown')
         return ConversationHandler.END
     
-    # Store process ID
     process_id = res1['process_id']
     user_data[user_id] = {
         'process_id': process_id,
@@ -163,8 +149,7 @@ async def get_mobile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await msg.edit_text(
         f"✅ *Phase 1 Initialized!*\n\n"
         f"🔑 Process ID: `{process_id}`\n"
-        f"📱 Mobile: `{mobile}`\n"
-        f"📊 Status: {res1.get('message', 'Ready')}\n\n"
+        f"📱 Mobile: `{mobile}`\n\n"
         f"📩 *Please enter the EID OTP (Phase 1):*",
         parse_mode='Markdown'
     )
@@ -181,7 +166,7 @@ async def get_otp1(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     process_id = user_data[user_id]['process_id']
     
-    msg = await update.message.reply_text("🔄 *Verifying OTP 1...*\n🔍 Extracting Target Info...", parse_mode='Markdown')
+    msg = await update.message.reply_text("🔄 *Verifying OTP 1...*", parse_mode='Markdown')
     
     res2 = client.verify_phase1(process_id, otp1)
     
@@ -189,7 +174,6 @@ async def get_otp1(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.edit_text(f"❌ *ERROR:* {res2.get('detail', res2)}", parse_mode='Markdown')
         return ConversationHandler.END
     
-    # Store user info
     user_data[user_id].update({
         'name': res2['original_name'],
         'eid': res2['eid_number']
@@ -200,9 +184,8 @@ async def get_otp1(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await msg.edit_text(
         f"🎯 *TARGET ACQUIRED!*\n\n"
-        f"👤 ━━ Name: *{name}*\n"
-        f"🆔 ━━ EID: `{eid}`\n"
-        f"📊 ━━ Status: {res2.get('message', 'Ready')}\n\n"
+        f"👤 Name: *{name}*\n"
+        f"🆔 EID: `{eid}`\n\n"
         f"📩 *Please enter the Download OTP (Phase 2):*",
         parse_mode='Markdown'
     )
@@ -220,43 +203,33 @@ async def get_otp2(update: Update, context: ContextTypes.DEFAULT_TYPE):
     process_id = user_data[user_id]['process_id']
     name = user_data[user_id]['name']
     
-    msg = await update.message.reply_text("🔄 *Processing...*\n🔓 Brute-forcing PDF & Stripping Security...", parse_mode='Markdown')
+    msg = await update.message.reply_text("🔄 *Processing PDF...*", parse_mode='Markdown')
     
-    # Generate filename
     safe_name = "".join(c for c in name if c.isalnum())
     pdf_name = f"{safe_name}_Unlocked_Aadhaar.pdf"
     
     res3 = client.verify_phase2(process_id, otp2, pdf_name)
     
     if res3.get("status") == "success":
-        # Send the PDF file
-        await msg.edit_text("📤 *Uploading PDF to Telegram...*", parse_mode='Markdown')
+        await msg.edit_text("📤 *Uploading PDF...*", parse_mode='Markdown')
         
         try:
             with open(res3['file'], 'rb') as pdf_file:
                 await update.message.reply_document(
                     document=pdf_file,
                     filename=pdf_name,
-                    caption=f"🎉 *MISSION ACCOMPLISHED!* [✓]\n\n"
+                    caption=f"🎉 *MISSION ACCOMPLISHED!*\n\n"
                            f"👤 Name: *{name}*\n"
-                           f"📄 Aadhaar PDF successfully retrieved!\n\n"
-                           f"🔒 Stay safe, use responsibly.\n"
-                           f"👨‍💻 Made by @Click2Hackk",
+                           f"📄 Aadhaar PDF Retrieved!\n\n"
+                           f"Made by @Click2Hackk",
                     parse_mode='Markdown'
                 )
-            
             await msg.delete()
-            
-            # Clean up file
-            try:
-                os.remove(res3['file'])
-            except:
-                pass
+            os.remove(res3['file'])
         except Exception as e:
-            await msg.edit_text(f"❌ *Error sending file:* {str(e)}", parse_mode='Markdown')
+            await msg.edit_text(f"❌ *Error:* {str(e)}", parse_mode='Markdown')
             return ConversationHandler.END
         
-        # Clear user data
         if user_id in user_data:
             del user_data[user_id]
     else:
@@ -281,24 +254,12 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ==========================================
 # 4. MAIN FUNCTION
 # ==========================================
-def run_flask():
-    """Run Flask on port 5000"""
-    app.run(host='0.0.0.0', port=5000)
-
 def main():
     """Start the bot."""
-    # Your bot token
     TOKEN = "8635537345:AAEIcMVDIieiwlGlHWLr2Dr82Hhny3qcyss"
     
-    # Start Flask in background
-    flask_thread = threading.Thread(target=run_flask)
-    flask_thread.daemon = True
-    flask_thread.start()
-    
-    # Create the Application
     application = Application.builder().token(TOKEN).build()
     
-    # Add conversation handler
     conv_handler = ConversationHandler(
         entry_points=[
             CommandHandler('start', start),
@@ -314,17 +275,8 @@ def main():
     
     application.add_handler(conv_handler)
     
-    # Start the bot
     print(f"{G}[✓] Bot is running...{W}")
-    print(f"{C}[i] Flask server on port 5000{W}")
     print(f"{C}[i] Press Ctrl+C to stop{W}")
-    
-    # Handle graceful shutdown
-    def signal_handler(sig, frame):
-        print(f"\n{R}[!] Bot stopped by user.{W}")
-        sys.exit(0)
-    
-    signal.signal(signal.SIGINT, signal_handler)
     
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
@@ -332,5 +284,5 @@ if __name__ == '__main__':
     try:
         main()
     except KeyboardInterrupt:
-        print(f"\n{R}[!] Bot stopped by user.{W}")
+        print(f"\n{R}[!] Bot stopped.{W}")
         sys.exit()
