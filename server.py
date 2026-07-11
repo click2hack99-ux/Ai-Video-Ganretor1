@@ -3,7 +3,8 @@ import json
 import os
 import time
 import telebot
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
+from flask import Flask, request
+import threading
 
 # ==========================================
 # CONFIGURATION
@@ -13,14 +14,15 @@ API_KEY = "demo"
 DOMAIN = "https://antifiednullxosint.com"
 
 bot = telebot.TeleBot(BOT_TOKEN)
+app = Flask(__name__)
 
 # ==========================================
-# SESSION STORAGE (in-memory)
+# SESSION STORAGE
 # ==========================================
 user_sessions = {}
 
 # ==========================================
-# CORE API CLIENT (same as before)
+# CORE API CLIENT
 # ==========================================
 class AntifiedNullClient:
     def __init__(self, base_url, api_key):
@@ -61,25 +63,13 @@ client = AntifiedNullClient(DOMAIN, API_KEY)
 # BOT COMMAND HANDLERS
 # ==========================================
 
-@bot.message_handler(commands=['start'])
+@bot.message_handler(commands=['start', 'help'])
 def start(message):
     bot.reply_to(message, 
         "👋 *Welcome to Aadhaar PDF Generator Bot*\n\n"
-        "Send me a mobile number to start.\n"
-        "Example: `/start 9876543210`\n\n"
-        "Or just type your number directly.",
-        parse_mode='Markdown'
-    )
-
-@bot.message_handler(commands=['start', 'help'])
-def help_command(message):
-    bot.reply_to(message, 
-        "📌 *How to use:*\n"
-        "1. Send a valid mobile number\n"
-        "2. I'll send OTP request\n"
-        "3. Reply with OTP1 (EID)\n"
-        "4. Reply with OTP2 (Download)\n"
-        "5. I'll send you PDF file",
+        "Send me a 10-digit mobile number to start.\n"
+        "Example: `9876543210`\n\n"
+        "Or type /help for instructions.",
         parse_mode='Markdown'
     )
 
@@ -91,7 +81,6 @@ def handle_mobile(message):
     bot.send_chat_action(chat_id, 'typing')
     msg = bot.reply_to(message, f"🔄 Processing mobile: `{mobile}` ...", parse_mode='Markdown')
     
-    # Call API Phase 1
     res = client.init_phase1(mobile)
     
     if "process_id" not in res:
@@ -170,13 +159,10 @@ def handle_otp2(message):
     res = client.verify_phase2(process_id, otp2, pdf_name)
     
     if res.get("status") == "success":
-        # Send PDF file
         with open(pdf_name, 'rb') as f:
             bot.send_document(chat_id, f, caption=f"✅ PDF Generated!\n👤 Name: {name}\n📁 File: {pdf_name}")
         
         bot.delete_message(chat_id, msg.message_id)
-        
-        # Cleanup
         os.remove(pdf_name)
         del user_sessions[chat_id]
     else:
@@ -194,8 +180,34 @@ def fallback(message):
     )
 
 # ==========================================
-# RUN BOT
+# FLASK WEBHOOK (Render ke liye)
+# ==========================================
+@app.route('/')
+def home():
+    return "Bot is running!"
+
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return 'OK', 200
+    return 'Bad Request', 400
+
+# ==========================================
+# MAIN ENTRY
 # ==========================================
 if __name__ == "__main__":
-    print("🤖 Bot is running...")
-    bot.infinity_polling()
+    # Webhook set karo (Render pe)
+    WEBHOOK_URL = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME', 'your-app.onrender.com')}/webhook"
+    
+    # Bot ko webhook pe set karo
+    bot.remove_webhook()
+    time.sleep(1)
+    bot.set_webhook(url=WEBHOOK_URL)
+    
+    print(f"✅ Webhook set to: {WEBHOOK_URL}")
+    
+    # Flask server start
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
